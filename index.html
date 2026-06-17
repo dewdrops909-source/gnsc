@@ -523,14 +523,27 @@ function oMo(title, body) {
 }
 function cMo() { document.getElementById('mo').classList.remove('on'); }
 function clearData() {
-  // Clear operational data only — keep all masters
+  if(!confirm('Clear all operational data? Masters will be kept.')) return;
+  // Clear localStorage
   ['gnsc_routes','gnsc_vehicles','gnsc_actlog','gnsc_loadhist','gnsc_dayhist',
    'gnsc_lastday','gnsc_tomorrow','gnsc_actual_indent','gnsc_indent_date',
    'gnsc_gate_alerts','gnsc_todayindent'].forEach(k=>localStorage.removeItem(k));
+  // Clear Firebase live & daily data
+  if(typeof db!=='undefined') {
+    db.ref('gnsc/live').remove();
+    db.ref('gnsc/daily').remove();
+    db.ref('gnsc/gate_alerts').remove();
+  }
   location.reload();
 }
 function clearAll() {
+  if(!confirm('Clear EVERYTHING including masters? This cannot be undone.')) return;
+  // Clear all localStorage
   Object.keys(localStorage).filter(k=>k.startsWith('gnsc_')).forEach(k=>localStorage.removeItem(k));
+  // Clear all Firebase data
+  if(typeof db!=='undefined') {
+    db.ref('gnsc').remove();
+  }
   location.reload();
 }
 
@@ -1670,7 +1683,7 @@ function openVMo(vid) {
     html+=`<div style="background:var(--rdd);border:1px solid var(--red);border-radius:8px;padding:11px 13px;margin-bottom:10px">
       <div style="font-size:11px;font-weight:800;color:var(--red);margin-bottom:9px">🚨 Not in fleet master — update details to proceed</div>
       <div class="field" style="margin-bottom:8px"><label>Transporter *</label>
-        <input id="vmo_vnd" type="text" value="${esc(masterEntry?.vendor!=='—'?masterEntry.vendor:v.vendor!=='—'?v.vendor:'')}" placeholder="Transporter name" list="tdl-vmo" style="background:var(--sur2);border:1px solid var(--bdr);border-radius:7px;padding:9px 10px;color:var(--txt);font-family:'Inter',sans-serif;font-size:14px;outline:none;width:100%">
+        <input id="vmo_vnd" type="text" value="${esc(masterEntry&&masterEntry.vendor&&masterEntry.vendor!=='—'?masterEntry.vendor:v.vendor&&v.vendor!=='—'?v.vendor:'')}" placeholder="Transporter name" list="tdl-vmo" style="background:var(--sur2);border:1px solid var(--bdr);border-radius:7px;padding:9px 10px;color:var(--txt);font-family:'Inter',sans-serif;font-size:14px;outline:none;width:100%">
         <datalist id="tdl-vmo">${[...new Set([...masterVehicles.map(v=>v.vendor),...masterTrans.map(t=>t.name)].filter(x=>x&&x!=='—'))].map(v=>`<option value="${esc(v)}">`).join('')}</datalist>
       </div>
       <div class="field" style="margin-bottom:10px"><label>Vehicle Type *</label>
@@ -1689,7 +1702,7 @@ function openVMo(vid) {
     html+=`<div style="background:var(--rdd);border:1px solid var(--red);border-radius:8px;padding:11px 13px;margin-bottom:10px">
       <div style="font-size:11px;font-weight:800;color:var(--red);margin-bottom:9px">🚨 Master incomplete — update details</div>
       <div class="field" style="margin-bottom:8px"><label>Transporter *</label>
-        <input id="vmo_vnd" type="text" value="${esc(masterEntry?.vendor!=='—'?masterEntry?.vendor:v.vendor!=='—'?v.vendor:'')}" placeholder="Transporter name" list="tdl-vmo2" style="background:var(--sur2);border:1px solid var(--bdr);border-radius:7px;padding:9px 10px;color:var(--txt);font-family:'Inter',sans-serif;font-size:14px;outline:none;width:100%">
+        <input id="vmo_vnd" type="text" value="${esc(masterEntry&&masterEntry.vendor&&masterEntry.vendor!=='—'?masterEntry.vendor:v.vendor&&v.vendor!=='—'?v.vendor:'')}" placeholder="Transporter name" list="tdl-vmo2" style="background:var(--sur2);border:1px solid var(--bdr);border-radius:7px;padding:9px 10px;color:var(--txt);font-family:'Inter',sans-serif;font-size:14px;outline:none;width:100%">
         <datalist id="tdl-vmo2">${[...new Set([...masterVehicles.map(x=>x.vendor),...masterTrans.map(t=>t.name)].filter(x=>x&&x!=='—'))].map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
       </div>
       <div class="field" style="margin-bottom:10px"><label>Vehicle Type *</label>
@@ -1698,7 +1711,7 @@ function openVMo(vid) {
       <button onclick="saveMasterFromVMo('${v.id}')" style="width:100%;padding:11px;background:var(--acc);color:#000;border:none;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif">✅ Save to Fleet Master</button>
     </div>`;
   } else {
-    html+=`<div style="background:var(--gnd);border:1px solid var(--grn);border-radius:8px;padding:8px 13px;margin-bottom:10px;font-size:11px;font-weight:700;color:var(--grn)">✅ In fleet master · ${esc(masterEntry.vendor)} · ${esc(masterEntry.type)}</div>`;
+    html+=`<div style="background:var(--gnd);border:1px solid var(--grn);border-radius:8px;padding:8px 13px;margin-bottom:10px;font-size:11px;font-weight:700;color:var(--grn)">✅ In fleet master · ${esc(masterEntry?.vendor||'—')} · ${esc(masterEntry?.type||'—')}</div>`;
   }
 
   // ETA display only for planned vehicles (not yet arrived)
