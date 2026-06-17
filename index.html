@@ -482,6 +482,15 @@ function startFirebaseSync() {
     localStorage.setItem('gnsc_indent',  JSON.stringify(masterIndent));
     if(currentRole) refreshDL();
   });
+  // Daily data listener (indent, tomorrow plan, docks)
+  db.ref('gnsc/daily').on('value',snap=>{
+    const d=snap.val(); if(!d) return;
+    if(d.actualIndent!==undefined){ actualIndent=d.actualIndent; localStorage.setItem('gnsc_actual_indent',String(d.actualIndent)); }
+    if(d.indentDate)  localStorage.setItem('gnsc_indent_date',d.indentDate);
+    if(d.tomorrowPlan){ tomorrowPlan=d.tomorrowPlan; localStorage.setItem('gnsc_tomorrow',JSON.stringify(tomorrowPlan)); }
+    if(d.docks){ DOCKS=d.docks; localStorage.setItem('gnsc_docks',JSON.stringify(DOCKS)); }
+    if(currentRole) renderAll();
+  });
   // Gate alerts listener
   db.ref('gnsc/gate_alerts').on('value',snap=>{
     const alerts=snap.val()||[];
@@ -848,6 +857,15 @@ function saveIndent() {
   localStorage.setItem('gnsc_actual_indent',String(val));
   localStorage.setItem('gnsc_indent_date',TODAY);
   log('TRANSPORT','📦 Actual indent: '+val+' batches','var(--acc)');
+  // Sync to Firebase so all devices see it
+  if(typeof db!=='undefined') {
+    db.ref('gnsc/daily').set({
+      actualIndent: val,
+      indentDate: TODAY,
+      tomorrowPlan: tomorrowPlan,
+      docks: DOCKS
+    }).catch(e=>console.warn('FB daily:',e));
+  }
   cMo();
   toast('✅ Actual indent: '+val+' batches');
   switchTab('dashboard');
@@ -2736,6 +2754,13 @@ function tomorrowPreview() {
   window._tmrwParsed=parsed;
   toast('🌙 '+parsed.length+' routes ready for tomorrow');
 }
+function syncDaily() {
+  if(typeof db==='undefined') return;
+  db.ref('gnsc/daily').set({
+    actualIndent, indentDate:localStorage.getItem('gnsc_indent_date')||TODAY,
+    tomorrowPlan, docks:DOCKS
+  }).catch(e=>console.warn('FB daily sync:',e));
+}
 function tomorrowUpload() {
   const parsed=window._tmrwParsed||[];
   if(!parsed.length){ toast('⚠️ Preview first','err'); return; }
@@ -2762,6 +2787,7 @@ function tomorrowUpload() {
 
   tomorrowPlan=parsed;
   localStorage.setItem('gnsc_tomorrow',JSON.stringify(tomorrowPlan));
+  syncDaily();
   document.getElementById('tmrwInput').value='';
   document.getElementById('tmrwPreview').style.display='none';
   document.getElementById('tmrwConfirm').style.display='none';
