@@ -787,8 +787,6 @@ function sel(role) {
     setInterval(updateCutBan,30000);
     setInterval(()=>{ TODAY=getToday(); if(currentRole){autoArchive();renderAll();updateCutBan();} },60000);
     setInterval(()=>{ const d=new Date(); if(d.getHours()===0&&d.getMinutes()===0){ TODAY=getToday(); checkDay(); renderCOBan(); renderAll(); } },60000);
-    // Start Firebase real-time sync
-    startFirebaseSync();
   }
   // Firebase connection status
   if(typeof db!=='undefined') {
@@ -3200,6 +3198,9 @@ window.addEventListener('beforeinstallprompt', e => {
     if(ban) ban.style.display = 'flex';
   }
 });
+// Start Firebase sync immediately when page loads
+document.addEventListener('DOMContentLoaded', ()=>{ startFirebaseSync(); });
+
 window.addEventListener('appinstalled', () => {
   const ban = document.getElementById('installBan');
   if(ban) ban.style.display = 'none';
