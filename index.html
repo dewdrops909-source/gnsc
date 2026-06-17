@@ -282,17 +282,27 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--txt);min-he
 <!-- ROLE GATE -->
 <div id="rg" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:32px 20px;position:relative;text-align:center">
 
-  <button onclick="clearData()" title="Clear today's data, keep masters" style="position:absolute;top:14px;left:14px;background:transparent;border:1px solid var(--bdr);color:var(--dim);border-radius:6px;padding:5px 10px;font-size:9px;font-weight:700;cursor:pointer;line-height:1">🗑 Clear Data</button>
-  <button onclick="clearAll()" title="Clear everything including masters" style="position:absolute;top:14px;right:14px;background:transparent;border:1px solid var(--red);color:var(--red);border-radius:6px;padding:5px 10px;font-size:9px;font-weight:700;cursor:pointer;line-height:1">⚠ Reset All</button>
-
   <div class="rg-logo">GNSC</div>
   <div class="rg-ttl">Vehicle Tracker</div>
   <div class="rg-sub">Jubilant FoodWorks · Supply Chain Centre</div>
-  <div class="rg-grid">
-    <div class="rg-btn rg-l" onclick="sel('leader')"><div class="rg-ic">🎯</div><div class="rg-nm">Leader</div><div class="rg-dc">Full overview</div></div>
-    <div class="rg-btn rg-w" onclick="sel('warehouse')"><div class="rg-ic">📦</div><div class="rg-nm">Warehouse</div><div class="rg-dc">Dock &amp; loading</div></div>
-    <div class="rg-btn rg-t" onclick="sel('transport')"><div class="rg-ic">🚛</div><div class="rg-nm">Transport</div><div class="rg-dc">Routes &amp; vehicles</div></div>
-    <div class="rg-btn rg-g" onclick="sel('gate')"><div class="rg-ic">🛡️</div><div class="rg-nm">Gate</div><div class="rg-dc">Entry &amp; exit</div></div>
+
+  <div style="width:100%;max-width:320px;margin-top:24px">
+    <div class="field" style="margin-bottom:12px;text-align:left">
+      <label style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.5px">Username</label>
+      <input id="lgUser" type="text" placeholder="Enter username" autocapitalize="none" autocorrect="off"
+        style="width:100%;background:var(--sur);border:1px solid var(--bdr);border-radius:8px;padding:12px 14px;color:var(--txt);font-family:'Inter',sans-serif;font-size:15px;outline:none;margin-top:5px"
+        onfocus="this.style.borderColor='var(--acc)'" onblur="this.style.borderColor='var(--bdr)'"
+        onkeydown="if(event.key==='Enter')document.getElementById('lgPass').focus()">
+    </div>
+    <div class="field" style="margin-bottom:16px;text-align:left">
+      <label style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.5px">Password</label>
+      <input id="lgPass" type="password" placeholder="Enter password"
+        style="width:100%;background:var(--sur);border:1px solid var(--bdr);border-radius:8px;padding:12px 14px;color:var(--txt);font-family:'Inter',sans-serif;font-size:15px;outline:none;margin-top:5px"
+        onfocus="this.style.borderColor='var(--acc)'" onblur="this.style.borderColor='var(--bdr)'"
+        onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <div id="lgErr" style="display:none;background:var(--rdd);border:1px solid var(--red);border-radius:8px;padding:10px;font-size:12px;font-weight:700;color:var(--red);margin-bottom:12px"></div>
+    <button onclick="doLogin()" style="width:100%;padding:14px;background:var(--acc);color:#000;border:none;border-radius:10px;font-size:15px;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif">Login →</button>
   </div>
 </div>
 
@@ -303,10 +313,19 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--txt);min-he
       <div class="logo">GNSC</div>
       <div><div style="font-weight:700;font-size:14px">Vehicle Tracker</div><div id="hDate" style="font-size:10px;color:var(--mut)"></div></div>
     </div>
-    <div style="display:flex;align-items:center;gap:8px">
+    <div style="display:flex;align-items:center;gap:6px">
       <span id="rChip" class="role-chip"></span>
-      <div class="live"><div class="dot"></div>LIVE</div>
+      <span id="liveInd" class="live"><div class="dot"></div>LIVE</span>
+      <button onclick="doLogout()" style="background:transparent;border:1px solid var(--bdr);color:var(--dim);border-radius:6px;padding:4px 8px;font-size:9px;font-weight:700;cursor:pointer">⏏ Out</button>
     </div>
+  </div>
+  <!-- Admin view toggle -->
+  <div id="adminToggle" style="display:none;background:var(--sur2);border-bottom:1px solid var(--bdr);padding:6px 12px;display:flex;align-items:center;gap:6px;overflow-x:auto">
+    <span style="font-size:9px;font-weight:700;color:var(--dim);text-transform:uppercase;white-space:nowrap">View →</span>
+    <button onclick="adminView('leader')"    id="av-leader"    style="border:none;border-radius:6px;padding:5px 10px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;background:var(--sur);color:var(--mut)">🎯 Leader</button>
+    <button onclick="adminView('transport')" id="av-transport" style="border:none;border-radius:6px;padding:5px 10px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;background:var(--sur);color:var(--mut)">🚛 Transport</button>
+    <button onclick="adminView('warehouse')" id="av-warehouse" style="border:none;border-radius:6px;padding:5px 10px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;background:var(--sur);color:var(--mut)">📦 Warehouse</button>
+    <button onclick="adminView('gate')"      id="av-gate"      style="border:none;border-radius:6px;padding:5px 10px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;background:var(--sur);color:var(--mut)">🛡️ Gate</button>
   </div>
   <div id="coBan"></div>
   <div id="cutBan" class="cut-ban cb-ok"></div>
@@ -324,13 +343,6 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--txt);min-he
   <div id="pg-add"       class="page"></div>
   <div id="pg-masters"   class="page"></div>
   <div id="pg-log"       class="page"></div>
-  <div id="rs">
-    <span style="font-size:9px;font-weight:700;color:var(--dim);text-transform:uppercase;white-space:nowrap;flex-shrink:0">Role →</span>
-    <div class="rsb rsb-l" id="rs-leader"    onclick="sel('leader')">🎯 Leader</div>
-    <div class="rsb rsb-t" id="rs-transport" onclick="sel('transport')">🚛 Transport</div>
-    <div class="rsb rsb-w" id="rs-warehouse" onclick="sel('warehouse')">📦 Warehouse</div>
-    <div class="rsb rsb-g" id="rs-gate"      onclick="sel('gate')">🛡️ Gate</div>
-  </div>
 </div>
 
 <!-- MODAL -->
@@ -383,7 +395,87 @@ const SBG    = {short:'var(--ogd)',planned:'rgba(255,255,255,.04)',inside:'var(-
 const CUT_L  = '22:30';
 const CUT_OS = '12:30';
 
+// ─────────────────────────────────────────────
+// USER SYSTEM
+// ─────────────────────────────────────────────
+const DEFAULT_USERS = {
+  admin:     { password:'admin123',     role:'admin',     name:'Admin' },
+  leader:    { password:'leader123',    role:'leader',    name:'Leader' },
+  warehouse: { password:'warehouse123', role:'warehouse', name:'Warehouse' },
+  gate:      { password:'gate123',      role:'gate',      name:'Gate' },
+  transport: { password:'transport123', role:'transport', name:'Transport' }
+};
+let appUsers = JSON.parse(localStorage.getItem('gnsc_users')||'{}');
+// Merge defaults with any saved users
+if(!Object.keys(appUsers).length) {
+  appUsers={...DEFAULT_USERS};
+  localStorage.setItem('gnsc_users',JSON.stringify(appUsers));
+  // Push to Firebase immediately
+  if(typeof db!=='undefined') db.ref('gnsc/users').set(sanitize(appUsers)).catch(e=>console.warn(e));
+}
+
+let currentUser = JSON.parse(localStorage.getItem('gnsc_session')||'null');
+let adminViewRole = null; // what view admin is currently in
+
+function doLogin() {
+  const user=(document.getElementById('lgUser')?.value||'').trim().toLowerCase();
+  const pass=(document.getElementById('lgPass')?.value||'').trim();
+  const errEl=document.getElementById('lgErr');
+  if(!user||!pass){ errEl.textContent='Enter username and password'; errEl.style.display='block'; return; }
+  const u=appUsers[user];
+  if(!u||u.password!==pass) { errEl.textContent='❌ Invalid username or password'; errEl.style.display='block'; document.getElementById('lgPass').value=''; return; }
+  errEl.style.display='none';
+  currentUser={username:user,role:u.role,name:u.name};
+  localStorage.setItem('gnsc_session',JSON.stringify(currentUser));
+  launchApp();
+}
+
+function doLogout() {
+  currentUser=null;
+  adminViewRole=null;
+  localStorage.removeItem('gnsc_session');
+  location.reload();
+}
+
+function launchApp() {
+  if(!currentUser) return;
+  // Admin defaults to leader view on first login
+  if(currentUser.role==='admin' && !adminViewRole) adminViewRole='leader';
+  const role = currentUser.role==='admin' ? adminViewRole : currentUser.role;
+
+  // Show admin toggle bar
+  const at=document.getElementById('adminToggle');
+  if(at) at.style.display=currentUser.role==='admin'?'flex':'none';
+  if(currentUser.role==='admin') updateAdminToggle(role);
+
+  document.getElementById('rg').style.display='none';
+  document.getElementById('app').style.display='block';
+  sel(role);
+}
+
+function adminView(role) {
+  adminViewRole=role;
+  updateAdminToggle(role);
+  sel(role);
+}
+
+function updateAdminToggle(activeRole) {
+  ['leader','transport','warehouse','gate'].forEach(r=>{
+    const btn=document.getElementById('av-'+r);
+    if(btn) {
+      btn.style.background=r===activeRole?'var(--acc)':'var(--sur)';
+      btn.style.color=r===activeRole?'#000':'var(--mut)';
+    }
+  });
+}
+
+function saveAppUsers() {
+  localStorage.setItem('gnsc_users',JSON.stringify(appUsers));
+  if(typeof db!=='undefined') db.ref('gnsc/users').set(sanitize(appUsers)).catch(e=>console.warn(e));
+}
+
 const ROLE_TABS = {
+  admin:     [{id:'dashboard',ic:'📊',lb:'OVERVIEW'},{id:'fleet',ic:'🚛',lb:'FLEET'},{id:'routes',ic:'📍',lb:'ROUTES'},{id:'vehicles',ic:'🚛',lb:'VEHICLES'},{id:'details',ic:'📋',lb:'DETAILS'},{id:'plan',ic:'📤',lb:'PLAN'},{id:'update',ic:'🔄',lb:'UPDATE'},{id:'add',ic:'➕',lb:'ADD'},{id:'masters',ic:'🗂️',lb:'MASTERS'},{id:'analytics',ic:'📈',lb:'ANALYTICS'},{id:'log',ic:'📋',lb:'LOG'}],
   leader:    [{id:'dashboard',ic:'📊',lb:'OVERVIEW'},{id:'fleet',ic:'🚛',lb:'FLEET'},{id:'analytics',ic:'📈',lb:'ANALYTICS'}],
   warehouse: [{id:'whdash',ic:'📊',lb:'OVERVIEW'},{id:'docks',ic:'🔋',lb:'DOCKS'},{id:'details',ic:'📋',lb:'DETAILS'},{id:'update',ic:'🔄',lb:'UPDATE'},{id:'log',ic:'📋',lb:'LOG'}],
   transport: [{id:'dashboard',ic:'📊',lb:'OVERVIEW'},{id:'fleet',ic:'🚛',lb:'FLEET'},{id:'routes',ic:'📍',lb:'ROUTES'},{id:'vehicles',ic:'🚛',lb:'VEHICLES'},{id:'details',ic:'📋',lb:'DETAILS'},{id:'plan',ic:'📤',lb:'PLAN'},{id:'update',ic:'🔄',lb:'UPDATE'},{id:'add',ic:'➕',lb:'ADD'},{id:'masters',ic:'🗂️',lb:'MASTERS'},{id:'log',ic:'📋',lb:'LOG'}],
@@ -456,7 +548,7 @@ function saveMasters() {
 }
 function saveGateAlerts(alerts) {
   localStorage.setItem(ALERT_KEY, JSON.stringify(alerts));
-  if(typeof db!=='undefined') db.ref('gnsc/gate_alerts').set(alerts).catch(e=>console.warn(e));
+  if(typeof db!=='undefined') db.ref('gnsc/gate_alerts').set(sanitize(alerts)).catch(e=>console.warn(e));
 }
 function startFirebaseSync() {
   if(_fbListening) return;
@@ -469,6 +561,15 @@ function startFirebaseSync() {
   db.ref('gnsc/live').on('value',snap=>{
     if(_ignoreNext){_ignoreNext=false;return;}
     const d=snap.val(); if(!d) return;
+    // Guard: don't restore yesterday's data if local day has already reset
+    const localLast=localStorage.getItem('gnsc_lastday');
+    if(localLast===getToday()&&d.routes?.length) {
+      const fbRouteDate=(d.routes[0]?.date)||(d.routes.find(r=>r.date)?.date);
+      if(fbRouteDate&&fbRouteDate<getToday()) {
+        console.log('🚫 Ignoring stale Firebase data from '+fbRouteDate);
+        return;
+      }
+    }
     routes  =d.routes  ||[];
     vehicles=d.vehicles||[];
     actLog  =d.actLog  ||[];
@@ -494,9 +595,14 @@ function startFirebaseSync() {
     localStorage.setItem('gnsc_indent',  JSON.stringify(masterIndent));
     if(currentRole) refreshDL();
   });
-  // Daily data listener (indent, tomorrow plan, docks)
+  // Daily data listener (indent, tomorrow plan, docks, lastday)
   db.ref('gnsc/daily').on('value',snap=>{
     const d=snap.val(); if(!d) return;
+    // If Firebase says a new day has started, trigger checkDay on this device too
+    if(d.lastday && d.lastday!==localStorage.getItem('gnsc_lastday') && d.lastday===getToday()) {
+      localStorage.setItem('gnsc_lastday', d.lastday);
+      // Don't run checkDay again — Firebase live listener will bring the reset data
+    }
     if(d.actualIndent!==undefined){
       actualIndent=parseInt(d.actualIndent)||0;
       localStorage.setItem('gnsc_actual_indent',String(actualIndent));
@@ -506,6 +612,12 @@ function startFirebaseSync() {
     if(d.docks){ DOCKS=d.docks; localStorage.setItem('gnsc_docks',JSON.stringify(DOCKS)); }
     // Always re-render so indent shows on all devices
     if(currentRole) renderAll();
+  });
+  // Users listener — admin changes sync to all devices
+  db.ref('gnsc/users').on('value',snap=>{
+    const d=snap.val(); if(!d) return;
+    appUsers={...DEFAULT_USERS,...d};
+    localStorage.setItem('gnsc_users',JSON.stringify(appUsers));
   });
   // Gate alerts listener
   db.ref('gnsc/gate_alerts').on('value',snap=>{
@@ -634,7 +746,7 @@ function updateStatus(vid, newStatus) {
   if(newStatus==='loaded' && v.dock && v.dock!=='—') {
     const alerts=getGateAlerts().filter(a=>a.vid!==vid);
     alerts.unshift({vid,vnum:v.number,dock:v.dock,time:nowTime(),ts:Date.now(),ack:false,sentBy:'Warehouse',type:'loaded',msg:'Loaded — clear from dock'});
-    localStorage.setItem(ALERT_KEY,JSON.stringify(alerts.slice(0,20)));
+    saveGateAlerts(alerts.slice(0,20)); // syncs to Firebase so gate devices get it
   }
   if(newStatus==='breakdown') {
     v.prevStatus=v.status; v.status='breakdown';
@@ -671,7 +783,8 @@ function snapshotDay(date) {
 function checkDay() {
   TODAY = getToday(); // always use current date
   const last = localStorage.getItem('gnsc_lastday');
-  if(last && last!==TODAY) {
+  // Run if: never set before, OR date has changed
+  if(!last || last!==TODAY) {
     snapshotDay(last); // save yesterday's data before clearing
 
     // ── Step 1: Identify physical state of all vehicles ──────────────────
@@ -684,28 +797,40 @@ function checkDay() {
     // ── Step 2: Clear all routes (fresh plan) ────────────────────────────
     routes = [];
 
-    // ── Step 3: Keep only carry-over physical vehicles, clear planned ─────
+    // ── Step 3: Keep all vehicles in their exact state ───────────────────
     vehicles = vehicles.filter(v => {
-      if(v.status === 'out') return true;        // departed — autoArchive handles
-      if(['inside','dock','loaded'].includes(v.status)) {
+      if(v.status === 'out') return false;           // departed — remove at midnight
+      if(v.status === 'planned') {
         v.isCarryOver = true;
         v.carryOverDate = last;
-        v.routeId = null;                        // unlink from yesterday's route
-        return true;
+        return true;                                 // planned never arrived → carry-over Short
       }
-      return false;                              // planned but never arrived → remove
+      if(['inside','dock','loaded'].includes(v.status)) return true; // stays as-is, same state, same route
+      return false;
     });
 
-    // ── Step 4: Activate tomorrow's plan, skip undispatched carry-overs ──
-    const coNumbers = new Set(vehicles.filter(v=>v.isCarryOver).map(v=>v.number));
+    // Carry-over routes — planned vehicles keep their route but show as carry-over Short
+    routes = routes.filter(r => {
+      const v = vehicles.find(x => x.id === r.vehicleId);
+      if(v && v.isCarryOver) { r.isCarryOver = true; r.carryOverDate = last; return true; } // planned carry-over
+      if(['inside','dock','loaded'].includes(rSt(r))) { r.isCarryOver = true; r.carryOverDate = last; return true; } // physical carry-over
+      return false;
+    });
+
+    // ── Step 4: Activate tomorrow's plan ─────────────────────────────────
+    // Undispatched = physically inside AND already on a route (busy)
+    // Pool vehicles (inside but no route) → can be assigned to tomorrow's routes
+    const busyNumbers = new Set(
+      vehicles.filter(v=>['inside','dock','loaded'].includes(v.status)&&v.routeId).map(v=>v.number)
+    );
     let ra=0, va=0, skipped=[];
 
     if(tomorrowPlan.length) {
       tomorrowPlan.forEach(p=>{
-        // Skip if vehicle is carry-over (undispatched) — cannot be re-planned
-        if(p.vehicleNo && coNumbers.has(p.vehicleNo)) {
+        // Skip vehicle only if it's BUSY (on another route) — pool vehicles can still be assigned
+        if(p.vehicleNo && busyNumbers.has(p.vehicleNo)) {
           skipped.push(p.vehicleNo);
-          // Still add the route but as short (no vehicle)
+          // Route created as Short — vehicle is busy on carry-over route
           const rId=genRId();
           const route={id:rId,routeNo:p.routeNo,city:p.city,stores:p.stores,destType:p.destType,eta:p.eta,notes:'',vehicleId:null,status:'short',date:TODAY};
           routes.push(route); ra++;
@@ -716,10 +841,16 @@ function checkDay() {
         routes.push(route); ra++;
         if(p.vehicleNo) {
           const m=masterLookup(p.vehicleNo);
-          const vId=genId();
-          const veh={id:vId,number:p.vehicleNo,type:p.type||(m?.type||'24ft'),vendor:p.vendor!=='—'?p.vendor:(m?.vendor||'—'),dock:'—',routeId:rId,status:'planned',times:{planned:'00:00'},date:TODAY,eta:p.eta};
-          vehicles.push(veh);
-          route.vehicleId=vId; route.status='planned'; va++;
+          // Check if vehicle is already in pool (inside GNSC, no route)
+          const poolV=vehicles.find(v=>v.number===p.vehicleNo&&['inside','dock','loaded'].includes(v.status)&&!v.routeId);
+          if(poolV) {
+            // Reuse pool vehicle — link to new route
+            poolV.routeId=rId; route.vehicleId=poolV.id; route.status=poolV.status; va++;
+          } else {
+            const vId=genId();
+            const veh={id:vId,number:p.vehicleNo,type:p.type||(m?.type||'24ft'),vendor:p.vendor!=='—'?p.vendor:(m?.vendor||'—'),dock:'—',routeId:rId,status:'planned',times:{planned:'00:00'},date:TODAY,eta:p.eta};
+            vehicles.push(veh); route.vehicleId=vId; route.status='planned'; va++;
+          }
         }
       });
       tomorrowPlan=[];
@@ -734,22 +865,29 @@ function checkDay() {
     if(msgs.length) toast('🌅 New day · '+msgs.join(' · '));
 
     save();
+    syncDaily();
+    // Push lastday to Firebase so all devices know day has changed
+    if(typeof db!=='undefined') db.ref('gnsc/daily/lastday').set(TODAY).catch(e=>console.warn(e));
   }
   localStorage.setItem('gnsc_lastday',TODAY);
   autoArchive();
 }
 
 function autoArchive() {
-  const now=nowMins(), midnight=t2m('00:00');
+  const now=nowMins();
   vehicles=vehicles.filter(v=>{
     if(v.status!=='out') return true;
     const outM=t2m(v.times?.out||'00:00');
     const elapsed=now>=outM?now-outM:1440-outM+now;
     if(v.isCarryOver) return elapsed<120;  // carry-over: 2hr rule always
-    // Today's departed: midnight cleanup handles pre-midnight departures
-    // Post-midnight departures: remove 2hrs after departure
-    if(outM>t2m('00:00')&&outM<now) return elapsed<120; // departed after midnight today
-    return true; // before midnight — kept until day change (checkDay handles removal)
+    // Today's departed vehicles:
+    // If departed before midnight (outM > 0, meaning a real time was set today)
+    // Keep until midnight — checkDay handles removal
+    // If departed after midnight (early hours, outM is small like 0:05-6:00)
+    // Remove 2hrs after departure
+    const isPostMidnight = outM < t2m('06:00'); // departed after midnight, before 6am
+    if(isPostMidnight) return elapsed < 120;
+    return true; // departed during the day — keep until midnight (checkDay removes)
   });
   routes=routes.filter(r=>!r.vehicleId||!!vehicles.find(v=>v.id===r.vehicleId));
 }
@@ -811,20 +949,24 @@ function sel(role) {
   document.getElementById('app').style.display='block';
   const cb=document.getElementById('clearBar'); if(cb) cb.style.display='none';
   const chip=document.getElementById('rChip');
-  chip.textContent=ri.icon+' '+ri.name; chip.className='role-chip '+ri.cls;
+  const displayName=currentUser?currentUser.name:ri.name;
+  chip.textContent=ri.icon+' '+displayName; chip.className='role-chip '+ri.cls;
+  // Use toggled view role for tabs — admin sees exactly what that role sees
+  const tabRole=(currentUser?.role==='admin') ? (adminViewRole||role) : role;
   ['leader','transport','warehouse','gate'].forEach(r=>{
     const el=document.getElementById('rs-'+r);
     if(el) el.className='rsb rsb-'+r[0]+(r===role?' on':'');
   });
-  buildTabs();
-  switchTab(ROLE_TABS[role][0].id);
+  buildTabs(tabRole);
+  switchTab((ROLE_TABS[tabRole]||ROLE_TABS[role])[0].id);
   if(!started) {
     started=true;
     checkDay(); tick();
     setInterval(tick,60000);
     setInterval(updateCutBan,30000);
     setInterval(()=>{ TODAY=getToday(); if(currentRole){autoArchive();renderAll();updateCutBan();} },60000);
-    setInterval(()=>{ const d=new Date(); if(d.getHours()===0&&d.getMinutes()===0){ TODAY=getToday(); checkDay(); renderCOBan(); renderAll(); } },60000);
+    // Check for day change every minute (catches missed midnight even if phone was sleeping)
+    setInterval(()=>{ const last=localStorage.getItem('gnsc_lastday'); if(last&&last!==getToday()){ TODAY=getToday(); checkDay(); renderCOBan(); renderAll(); } },60000);
   }
   // Firebase connection status
   if(typeof db!=='undefined') {
@@ -845,8 +987,20 @@ function sel(role) {
     });
   }
   // Gate alert polling
-  if(role==='gate') startAlertPoll();
-  else stopAlertPoll();
+  if(role==='gate') {
+    startAlertPoll();
+    requestNotificationPermission();
+  } else stopAlertPoll();
+
+  // Leader status push every 2 hours
+  if(role==='leader') {
+    requestNotificationPermission().then(()=>startLeaderStatusPush());
+  } else stopLeaderStatusPush();
+
+  // Warehouse dock overstay alerts
+  if(role==='warehouse') {
+    requestNotificationPermission().then(()=>startDockAlertPoll());
+  } else stopDockAlertPoll();
   // Indent prompt for transport on first login of the day
   if(role==='transport') checkIndentPrompt();
 }
@@ -897,8 +1051,9 @@ function tick() {
   const el=document.getElementById('hDate');
   if(el) el.textContent=d.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
 }
-function buildTabs() {
-  document.getElementById('tabBar').innerHTML=ROLE_TABS[currentRole].map(t=>
+function buildTabs(role) {
+  const tabRole=role||currentRole;
+  document.getElementById('tabBar').innerHTML=(ROLE_TABS[tabRole]||ROLE_TABS[currentRole]).map(t=>
     `<div class="tab" id="tab-${t.id}" onclick="switchTab('${t.id}')"><span class="tab-ic">${t.ic}</span>${t.lb}</div>`
   ).join('');
 }
@@ -1003,7 +1158,7 @@ function renderDash() {
   shortR.slice(0,3).forEach(r=>{ alerts+=`<div class="al al-o">⚠️ Route <strong>${esc(r.routeNo)}</strong> (${esc(r.city)}) — No vehicle</div>`; });
   if(shortR.length>3) alerts+=`<div class="al al-o">⚠️ ${shortR.length-3} more routes without vehicles</div>`;
   loaded.forEach(v=>{ const ct=t2m(cutoff({destType:vDT(v)})),df=ct-now; if(df<=0) alerts+=`<div class="al al-r">🚨 <strong>${esc(v.number)}</strong> loaded — past cutoff!</div>`; else if(df<=30) alerts+=`<div class="al al-o">⚠️ <strong>${esc(v.number)}</strong> loaded — ${df}m to cutoff</div>`; });
-  vehicles.filter(v=>v.routeId&&v.status==='dock'&&dockMins(v)>=90).forEach(v=>{ alerts+=`<div class="al al-o">⚠️ <strong>${esc(v.number)}</strong> on dock ${dockMins(v)}m — over 1:30</div>`; });
+  vehicles.filter(v=>v.routeId&&v.status==='dock'&&dockMins(v)>=75).forEach(v=>{ alerts+=`<div class="al al-o">⚠️ <strong>${esc(v.number)}</strong> on dock ${dockMins(v)}m — over 1:15</div>`; });
 
   // City tracker
   const cmap={};
@@ -1024,7 +1179,11 @@ function renderDash() {
   const indentActual  = actualIndent||0;
 
   el.innerHTML=`
-    <div class="pg-h"><div><div class="pg-t">Today's Overview</div><div class="pg-s">${total} routes planned · ${inGNSC.length} in GNSC · ${out.length} departed</div></div><div class="pg-time">${nowTime()}</div></div>
+    <div class="pg-h"><div><div class="pg-t">Today's Overview</div><div class="pg-s">${total} routes planned · ${inGNSC.length} in GNSC · ${out.length} departed</div></div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+      <div class="pg-time">${nowTime()}</div>
+      <button onclick="sendLeaderStatusPush()" style="background:transparent;border:1px solid var(--bdr);color:var(--dim);border-radius:6px;padding:3px 8px;font-size:9px;font-weight:700;cursor:pointer">📊 Push Now</button>
+    </div></div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
       <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:20px;padding:6px 14px;display:inline-flex;align-items:baseline;gap:8px">
         <span style="font-size:10px;font-weight:700;color:var(--mut)">📦 Indent</span>
@@ -1393,7 +1552,7 @@ function confirmOut(vid) {
       <div style="font-family:var(--mono);font-size:18px;font-weight:800;color:var(--acc)">${esc(v.number)}</div>
       ${r?`<div style="font-size:11px;color:var(--mut);margin-top:3px">${esc(r.city)} · ${r.stores?.length||0} stores</div>`:''}
     </div>
-    <button class="act-btn" style="background:var(--acc);color:#000" onclick="updateStatus('${vid}','out');cMo()">✅ Confirm Gate OUT</button>
+    <button class="act-btn" style="background:var(--acc);color:#000" onclick="updateStatus('${vid}','out');cMo();setTimeout(()=>{const tv=vehicles.filter(v=>!v.isCarryOver);if(tv.length>0&&tv.every(v=>v.status==='out'))sendLeaderStatusPush();},500)">✅ Confirm Gate OUT</button>
     <button class="btn-s" onclick="cMo()">Cancel</button>`),200);
 }
 function resolveBreak(vid, action) {
@@ -1842,7 +2001,7 @@ function renderVehicles() {
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:5px;margin-bottom:2px;flex-wrap:wrap">
             <span style="font-family:var(--mono);font-weight:800;font-size:14px">${esc(v.number)}</span>
-            ${v.isCarryOver?'<span class="yday">YDAY</span>':''}
+            ${v.isCarryOver&&v.routeId?'<span class="yday">YDAY</span>':''}
             <span style="font-size:9px;padding:1px 6px;border-radius:4px;font-weight:800;background:${SBG[v.status]};color:${SC[v.status]}">${SI[v.status]} ${SL[v.status]}</span>
             ${notMaster?`<span style="font-size:9px;background:var(--rdd);color:var(--red);border:1px solid var(--red);border-radius:4px;padding:1px 5px;font-weight:800">NOT IN MASTER</span>`:''}
           </div>
@@ -1873,7 +2032,8 @@ function renderWHDash() {
   const pendD=vehicles.filter(v=>v.status==='inside'&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete);
   const atD  =vehicles.filter(v=>v.status==='dock'&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete);
   const loaded=vehicles.filter(v=>v.status==='loaded'&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete);
-  const dAlerts=atD.filter(v=>dockMins(v)>=90);
+  const departed=vehicles.filter(v=>v.status==='out'&&!v.isUnplanned&&!v.masterIncomplete);
+  const dAlerts=atD.filter(v=>dockMins(v)>=75);
   const docksAct=new Set(atD.map(v=>v.dock).filter(d=>d&&d!=='—')).size;
   const LL=loaded.filter(v=>vDT(v)!=='outstation').length;
   const OL=loaded.filter(v=>vDT(v)==='outstation').length;
@@ -1889,21 +2049,45 @@ function renderWHDash() {
   });
   const types=[...new Set([...Object.keys(tAvg),...Object.keys(hAvg)])];
 
+  // L/OS counts for each stage
+  const stLO=(arr)=>{
+    const l=arr.filter(v=>vDT(v)!=='outstation').length;
+    const o=arr.filter(v=>vDT(v)==='outstation').length;
+    return `<div style="display:flex;gap:3px;justify-content:center;margin-top:3px">
+      ${l?`<span style="font-size:8px;font-weight:800;color:var(--mut);background:var(--sur2);border-radius:3px;padding:1px 4px">${l}L</span>`:''}
+      ${o?`<span style="font-size:8px;font-weight:800;color:var(--mut);background:var(--sur2);border-radius:3px;padding:1px 4px">${o}OS</span>`:''}
+    </div>`;
+  };
+
+  // total local/OS from routes
+  const totalL=routes.filter(r=>!r.isCarryOver&&rSt(r)!=='out'&&(r.destType||'local')!=='outstation').length;
+  const totalOS=routes.filter(r=>!r.isCarryOver&&rSt(r)!=='out'&&r.destType==='outstation').length;
+
   el.innerHTML=`<div class="pg-h"><div><div class="pg-t">📦 Warehouse Overview</div></div><div class="pg-time">${nowTime()}</div></div>
-    <div class="sg2">
+    <div class="sg2" style="margin-bottom:8px">
       <div class="sc"><div class="sc-n" style="color:var(--acc)">${total}</div><div class="sc-l">📋 Total Planned</div></div>
       <div class="sc" onclick="${notIn.length?'showNotIn()':''}" style="${notIn.length?'cursor:pointer;border-color:var(--acc)':''}"><div class="sc-n" style="color:${notIn.length?'var(--acc)':'var(--grn)'}">${notIn.length}</div><div class="sc-l">🏭 Not at GNSC${notIn.length?' →':''}</div></div>
     </div>
-    <div class="sg2">
+    <div class="sg2" style="margin-bottom:8px">
       <div class="sc" style="${pendD.length?'border-color:var(--blu)':''}"><div class="sc-n" style="color:${pendD.length?'var(--blu)':'var(--dim)'}">${pendD.length}</div><div class="sc-l">🕐 Pending Dock</div></div>
       <div class="sc" style="${atD.length?'border-color:var(--pur)':''}"><div class="sc-n" style="color:${atD.length?'var(--pur)':'var(--dim)'}">${atD.length}</div><div class="sc-l">🔋 At Dock · ${docksAct} bays</div></div>
     </div>
-    <div style="background:var(--sur);border:1px solid ${loaded.length?'var(--grn)':'var(--bdr)'};border-radius:var(--r);padding:11px;margin-bottom:8px">
-      <div class="sc-l" style="margin-bottom:6px">📦 Loaded — Awaiting Dispatch</div>
-      <div class="sc-n" style="color:var(--grn);margin-bottom:7px">${loaded.length}</div>
-      <div style="display:flex;gap:6px">
-        <div style="flex:1;background:var(--acd);border-radius:5px;padding:5px;text-align:center"><div style="font-family:var(--mono);font-size:18px;font-weight:800;color:var(--acc)">${LL}</div><div style="font-size:9px;color:var(--mut);font-weight:700">🏙️ Local</div></div>
-        <div style="flex:1;background:var(--bld);border-radius:5px;padding:5px;text-align:center"><div style="font-family:var(--mono);font-size:18px;font-weight:800;color:var(--blu)">${OL}</div><div style="font-size:9px;color:var(--mut);font-weight:700">🛣️ Outstation</div></div>
+    <div class="sg2" style="margin-bottom:8px">
+      <div style="background:var(--sur);border:1px solid ${loaded.length?'var(--grn)':'var(--bdr)'};border-radius:var(--r);padding:11px">
+        <div class="sc-l" style="margin-bottom:4px">📦 Loaded</div>
+        <div class="sc-n" style="color:var(--grn);margin-bottom:7px">${loaded.length}</div>
+        <div style="display:flex;gap:6px">
+          <div style="flex:1;background:var(--acd);border-radius:5px;padding:5px;text-align:center"><div style="font-family:var(--mono);font-size:18px;font-weight:800;color:var(--acc)">${LL}</div><div style="font-size:9px;color:var(--mut);font-weight:700">🏙️ Local</div></div>
+          <div style="flex:1;background:var(--bld);border-radius:5px;padding:5px;text-align:center"><div style="font-family:var(--mono);font-size:18px;font-weight:800;color:var(--blu)">${OL}</div><div style="font-size:9px;color:var(--mut);font-weight:700">🛣️ Outstation</div></div>
+        </div>
+      </div>
+      <div style="background:var(--sur);border:1px solid ${departed.length?'var(--acc)':'var(--bdr)'};border-radius:var(--r);padding:11px">
+        <div class="sc-l" style="margin-bottom:4px">✅ Departed</div>
+        <div class="sc-n" style="color:${departed.length?'var(--acc)':'var(--dim)'}; margin-bottom:7px">${departed.length}</div>
+        <div style="display:flex;gap:6px">
+          <div style="flex:1;background:var(--acd);border-radius:5px;padding:5px;text-align:center"><div style="font-family:var(--mono);font-size:18px;font-weight:800;color:var(--acc)">${departed.filter(v=>vDT(v)!=='outstation').length}</div><div style="font-size:9px;color:var(--mut);font-weight:700">🏙️ Local</div></div>
+          <div style="flex:1;background:var(--bld);border-radius:5px;padding:5px;text-align:center"><div style="font-family:var(--mono);font-size:18px;font-weight:800;color:var(--blu)">${departed.filter(v=>vDT(v)==='outstation').length}</div><div style="font-size:9px;color:var(--mut);font-weight:700">🛣️ Outstation</div></div>
+        </div>
       </div>
     </div>
     ${dAlerts.length?`<div class="sec" style="margin-bottom:8px">🚨 Dock Alerts</div>${dAlerts.map(v=>`<div class="al al-o">⚠️ <strong>${esc(v.number)}</strong> — ${dockMins(v)}m on dock</div>`).join('')}`:''}
@@ -1936,7 +2120,7 @@ function renderDocks() {
   const occ=dockOccupied();
   const atD=vehicles.filter(v=>v.status==='dock').sort((a,b)=>t2m(a.times?.dock||'')-t2m(b.times?.dock||''));
 
-  const tiles=DOCKS.map(d=>{ const dn=dockN(d), v=occ[dn], m=v?dockMins(v):0, over=m>=90;
+  const tiles=DOCKS.map(d=>{ const dn=dockN(d), v=occ[dn], m=v?dockMins(v):0, over=m>=75;
     return `<div class="dtile" style="${v?`border-color:${over?'var(--org)':'var(--pur)'}`:''};${v?'cursor:pointer':''}" ${v?`onclick="openVMo('${v.id}')"`:''}><div class="dt-n" style="color:${v?(over?'var(--org)':'var(--pur)'):'var(--dim)'}">${esc(dn)}</div>${v?`<div class="dt-v">${esc(v.number.slice(-6))}</div><div class="dt-t" style="color:${over?'var(--org)':'var(--mut)'}">${fmtM(m)}${over?' ⚠️':''}</div>`:`<div class="dt-v" style="color:var(--grn)">Free</div>`}</div>`;
   }).join('');
 
@@ -1946,7 +2130,7 @@ function renderDocks() {
   } else {
     html+=`<div class="sec" style="margin-bottom:8px">🔋 Active Loading <span class="sec-b">${atD.length}</span></div>`;
     atD.forEach(v=>{
-      const m=dockMins(v), over=m>=90, pct=Math.min(100,Math.round(m/90*100));
+      const m=dockMins(v), over=m>=75, pct=Math.min(100,Math.round(m/90*100));
       const r=vR(v);
       const freeDocks=DOCKS.map(dockN).filter(d=>d!==v.dock&&!occ[d]);
       html+=`<div style="background:var(--sur);border:1px solid ${over?'var(--org)':'var(--bdr)'};border-left:3px solid ${over?'var(--org)':'var(--pur)'};border-radius:var(--r);padding:12px 13px;margin-bottom:9px">
@@ -2039,12 +2223,15 @@ function renderUpdate() {
           const dBtns=DOCKS.map(d=>{ const dn=dockN(d), free=!occ[dn]; return `<button onclick="${free?`wAssignDock('${v.id}','${dn}')`:''}" style="padding:9px 4px;flex:1;background:${free?'var(--sur)':'var(--sur2)'};border:2px solid ${free?'var(--pur)':'var(--bdr)'};border-radius:7px;color:${free?'var(--pur)':'var(--dim)'};font-family:var(--mono);font-size:11px;font-weight:800;cursor:${free?'pointer':'not-allowed'};text-align:center">${esc(dn)}<div style="font-size:8px;font-weight:600;margin-top:1px;color:${free?'var(--pur)':'var(--dim)'}">${free?'Free':'Busy'}</div></button>`; }).join('');
           const existingAlert=getGateAlert(v.id);
           const alertPending=existingAlert&&!existingAlert.ack;
+          const alertAcked=existingAlert&&existingAlert.ack;
           html+=`<div style="background:var(--sur);border:1px solid var(--bdr);border-left:3px solid var(--blu);border-radius:var(--r);padding:11px 13px;margin-bottom:9px">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
               <div><div style="font-family:var(--mono);font-weight:800;font-size:15px">${esc(v.number)} ${dtag}${yd}</div>${r?`<div style="font-size:10px;color:var(--mut)">${esc(r.city)}${r.stores?.length?' · '+r.stores.length+' stores':''}</div>`:''}</div>
               <div style="text-align:right">
                 <div style="font-size:10px;color:var(--mut)">In since ${v.times?.inside||'—'}</div>
-                <button onclick="sendGateAlert('${v.id}','${esc(v.number)}')" style="margin-top:4px;background:${alertPending?'var(--ogd)':'var(--sur2)'};border:1px solid ${alertPending?'var(--org)':'var(--bdr)'};color:${alertPending?'var(--org)':'var(--mut)'};border-radius:6px;padding:4px 9px;font-size:10px;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif">${alertPending?'📢 Alerted':'📢 Alert Gate'}</button>
+                <button onclick="sendGateAlert('${v.id}','${esc(v.number)}')" style="margin-top:4px;display:flex;align-items:center;gap:5px;background:${alertAcked?'var(--gnd)':alertPending?'var(--ogd)':'var(--sur2)'};border:1px solid ${alertAcked?'var(--grn)':alertPending?'var(--org)':'var(--bdr)'};color:${alertAcked?'var(--grn)':alertPending?'var(--org)':'var(--mut)'};border-radius:6px;padding:4px 9px;font-size:10px;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif">
+                  ${alertAcked?'<span style="width:8px;height:8px;border-radius:50%;background:var(--grn);display:inline-block"></span> Gate Confirmed':alertPending?'📢 Alerted':'📢 Alert Gate'}
+                </button>
               </div>
             </div>
             <div style="font-size:9px;font-weight:800;color:var(--mut);text-transform:uppercase;margin-bottom:6px">🔋 Select Dock — tap to assign</div>
@@ -2085,6 +2272,121 @@ function wAssignDock(vid, dock) {
 }
 
 // ─────────────────────────────────────────────
+// WAREHOUSE DOCK OVERSTAY ALERTS (push)
+// ─────────────────────────────────────────────
+let _dockAlertInterval=null;
+const _dockAlertSent=new Set(); // track which vehicles already got a push today
+
+function checkDockOverstay() {
+  if(currentRole!=='warehouse') return;
+  vehicles.filter(v=>v.status==='dock'&&v.routeId&&dockMins(v)>=75).forEach(v=>{
+    const key=v.id+'_'+TODAY;
+    if(!_dockAlertSent.has(key)) {
+      _dockAlertSent.add(key);
+      const mins=dockMins(v);
+      sendPushNotification(
+        `⚠️ Dock Overstay — ${v.number}`,
+        `${esc(v.number)} has been on Dock ${v.dock} for ${mins} mins — over 1:15`
+      );
+    }
+  });
+}
+
+function startDockAlertPoll() {
+  if(_dockAlertInterval) clearInterval(_dockAlertInterval);
+  checkDockOverstay(); // check immediately
+  _dockAlertInterval=setInterval(checkDockOverstay, 5*60*1000); // every 5 mins
+}
+function stopDockAlertPoll() {
+  if(_dockAlertInterval){ clearInterval(_dockAlertInterval); _dockAlertInterval=null; }
+}
+let _statusPushInterval=null;
+
+function sendLeaderStatusPush() {
+  if(currentRole!=='leader') return;
+  const total=routes.filter(r=>!r.isCarryOver).length;
+  const planned=vehicles.filter(v=>v.status==='planned'&&!v.isCarryOver).length;
+  const inside=vehicles.filter(v=>v.status==='inside'&&!v.isCarryOver).length;
+  const atDock=vehicles.filter(v=>v.status==='dock'&&!v.isCarryOver).length;
+  const loaded=vehicles.filter(v=>v.status==='loaded'&&!v.isCarryOver).length;
+  const departed=vehicles.filter(v=>v.status==='out'&&!v.isCarryOver).length;
+  const broke=vehicles.filter(v=>v.status==='breakdown'&&!v.isCarryOver).length;
+  const shortR=routes.filter(r=>!r.isCarryOver&&rSt(r)==='short').length;
+  const now=new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+
+  // Check if all planned vehicles for today have departed
+  const todayVehicles=vehicles.filter(v=>!v.isCarryOver);
+  const allDeparted=total>0&&todayVehicles.length>0&&todayVehicles.every(v=>v.status==='out');
+
+  if(allDeparted) {
+    sendPushNotification(`✅ All Dispatched — ${now}`,
+      `All ${departed} vehicles for today have departed. Dispatch complete!`);
+    toast(`✅ All dispatched — final push sent`);
+    stopLeaderStatusPush();
+    return;
+  }
+
+  const parts=[];
+  if(total)    parts.push(`${total} routes`);
+  if(shortR)   parts.push(`⚠️ ${shortR} short`);
+  if(planned)  parts.push(`⏳ ${planned} awaited`);
+  if(inside)   parts.push(`🕐 ${inside} inside`);
+  if(atDock)   parts.push(`🔋 ${atDock} at dock`);
+  if(loaded)   parts.push(`📦 ${loaded} loaded`);
+  if(departed) parts.push(`✅ ${departed} departed`);
+  if(broke)    parts.push(`🚨 ${broke} breakdown`);
+
+  sendPushNotification(`GNSC Status — ${now}`, parts.join(' · '));
+  toast(`📊 Status push sent — ${now}`);
+}
+
+function startLeaderStatusPush() {
+  if(_statusPushInterval) clearInterval(_statusPushInterval);
+
+  function scheduleNext() {
+    const now=new Date();
+    const h=now.getHours(), m=now.getMinutes();
+    const totalMins=h*60+m;
+
+    // Push times: 11:00, 13:00, 15:00, 17:00, 19:00, 21:00, 23:00
+    const pushTimes=[11,13,15,17,19,21,23].map(x=>x*60);
+    const nextPush=pushTimes.find(t=>t>totalMins) || pushTimes[0]+1440; // next day 11am
+    const msUntilNext=(nextPush-totalMins)*60*1000 - now.getSeconds()*1000;
+
+    _statusPushInterval=setTimeout(()=>{
+      sendLeaderStatusPush();
+      if(_statusPushInterval) scheduleNext(); // schedule next unless stopped
+    }, msUntilNext);
+
+    // If current time is exactly a push time, send now
+    if(pushTimes.includes(totalMins)) sendLeaderStatusPush();
+  }
+
+  scheduleNext();
+}
+function stopLeaderStatusPush() {
+  if(_statusPushInterval){ clearInterval(_statusPushInterval); _statusPushInterval=null; }
+}
+async function requestNotificationPermission() {
+  if(!('Notification' in window)) return;
+  if(Notification.permission==='default') {
+    await Notification.requestPermission();
+  }
+}
+function sendPushNotification(title, body) {
+  if(!('Notification' in window)||Notification.permission!=='granted') return;
+  try {
+    new Notification(title, {
+      body,
+      icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23F4A228'/%3E%3Ctext x='32' y='44' font-size='36' text-anchor='middle' font-family='monospace' font-weight='bold' fill='%23000'%3EG%3C/text%3E%3C/svg%3E",
+      badge: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23F4A228'/%3E%3C/svg%3E",
+      tag: 'gnsc-alert',
+      requireInteraction: true
+    });
+  } catch(e){}
+}
+
+// ─────────────────────────────────────────────
 // GATE ALERT SYSTEM (warehouse → gate)
 // ─────────────────────────────────────────────
 const ALERT_KEY = 'gnsc_gate_alerts';
@@ -2107,13 +2409,14 @@ function sendGateAlert(vid, vnum) {
   `);
 }
 function doSendGateAlert(vid, vnum, dock) {
-  const alerts=getGateAlerts().filter(a=>a.vid!==vid);
-  alerts.unshift({vid,vnum,dock,time:nowTime(),ts:Date.now(),ack:false,sentBy:'Warehouse'});
-  saveGateAlerts(alerts.slice(0,20));
+  const alerts=getGateAlerts();
+  // Add new alert — keep all unacknowledged alerts visible
+  alerts.unshift({id:Date.now().toString(36),vid,vnum,dock,time:nowTime(),ts:Date.now(),ack:false,sentBy:'Warehouse',type:'dock'});
+  saveGateAlerts(alerts.slice(0,50));
   cMo(); toast('📢 Gate alerted — '+vnum+' → '+dock); renderUpdate();
 }
-function ackGateAlert(vid) {
-  const alerts=getGateAlerts().map(a=>a.vid===vid?{...a,ack:true,ackTime:nowTime()}:a);
+function ackGateAlert(alertId) {
+  const alerts=getGateAlerts().map(a=>a.id===alertId||a.vid===alertId?{...a,ack:true,ackTime:nowTime()}:a);
   saveGateAlerts(alerts);
   const banner=document.getElementById('gateBanner');
   if(banner) banner.style.display='none';
@@ -2134,19 +2437,29 @@ function checkGateAlerts() {
   const banner=document.getElementById('gateBanner');
   if(!banner) return;
   if(!alerts.length){ banner.style.display='none'; return; }
-  const latest=alerts[0];
+  // Show ALL pending alerts stacked
   banner.style.display='flex';
-  banner.innerHTML=`
-    <div style="flex:1">
-      <div style="font-size:10px;font-weight:800;color:#000;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📢 Warehouse Alert</div>
-      ${latest.type==='loaded'
-        ?`<div style="font-size:16px;font-weight:800;color:#000">Remove <span style="font-family:var(--mono)">${esc(latest.vnum)}</span> from Dock <span style="font-family:var(--mono)">${esc(latest.dock)}</span></div>
-          <div style="font-size:11px;color:rgba(0,0,0,.7);margin-top:2px">📦 Vehicle loaded — dock now free</div>`
-        :`<div style="font-size:16px;font-weight:800;color:#000">Place <span style="font-family:var(--mono)">${esc(latest.vnum)}</span> on Dock <span style="font-family:var(--mono)">${esc(latest.dock)}</span></div>`}
-      <div style="font-size:10px;color:rgba(0,0,0,.6);margin-top:3px">Sent by Warehouse · ${latest.time}</div>
-    </div>
-    <button onclick="ackGateAlert('${latest.vid}')" style="background:#000;color:var(--acc);border:none;border-radius:9px;padding:12px 16px;font-size:13px;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif;white-space:nowrap;flex-shrink:0">✓ Done</button>`;
-  // Play alert sound
+  banner.style.flexDirection='column';
+  banner.style.padding='10px 14px';
+  banner.style.gap='8px';
+  banner.innerHTML=alerts.map(a=>`
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="flex:1">
+        <div style="font-size:10px;font-weight:800;color:#000;text-transform:uppercase;letter-spacing:.5px">${a.type==='loaded'?'📦 Clear Dock':'📢 Place on Dock'}</div>
+        ${a.type==='loaded'
+          ?`<div style="font-size:15px;font-weight:800;color:#000">Remove <b style="font-family:monospace">${esc(a.vnum)}</b> from Dock <b style="font-family:monospace">${esc(a.dock)}</b></div>`
+          :`<div style="font-size:15px;font-weight:800;color:#000">Place <b style="font-family:monospace">${esc(a.vnum)}</b> on Dock <b style="font-family:monospace">${esc(a.dock)}</b></div>`}
+        <div style="font-size:9px;color:rgba(0,0,0,.6)">${a.time}</div>
+      </div>
+      <button onclick="ackGateAlert('${a.id||a.vid}')" style="background:#000;color:var(--acc);border:none;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0">✓ Done</button>
+    </div>${alerts.indexOf(a)<alerts.length-1?'<div style="border-top:1px solid rgba(0,0,0,.2)"></div>':''}`).join('');
+  // Send push notification for background alerts
+  alerts.forEach(a=>{
+    sendPushNotification(
+      a.type==='loaded'?'📦 Clear Dock — GNSC':'📢 Dock Alert — GNSC',
+      a.type==='loaded'?`Remove ${a.vnum} from Dock ${a.dock}`:`Place ${a.vnum} on Dock ${a.dock}`
+    );
+  });
   playAlertSound();
 }
 function playAlertSound() {
@@ -2496,9 +2809,7 @@ function addRoute() {
 
   const etaField=document.getElementById('rEtaF');
   const vInside=vNum?vehicles.find(v=>v.number===vNum&&['inside','dock','loaded'].includes(v.status)&&!v.isCarryOver):null;
-  const eta=vInside?'':(document.getElementById('rEta')?.value||'');
-  // Require ETA if vehicle not already inside
-  if(vNum&&!vInside&&!eta){ toast('⚠️ Enter ETA — vehicle not yet at GNSC','err'); return; }
+  const eta=vInside?'':(document.getElementById('rEta')?.value||'17:00'); // default 17:00
   const notes=(document.getElementById('rNotes')?.value||'').trim();
   const vNum =(document.getElementById('rVeh')?.value||'').trim().toUpperCase();
 
@@ -2660,7 +2971,7 @@ function parseBulk(text) {
     const [rNo, store, vNum]=c;
     if(!rNo||rNo==='Route No'||rNo==='route no') return;
     const key=rNo.trim().toUpperCase();
-    if(!map[key]) map[key]={routeNo:key,destType:'local',city:'—',stores:[],vehicleNo:'',eta:'',vendor:'—',type:'24ft',storeIssues:[]};
+    if(!map[key]) map[key]={routeNo:key,destType:'local',city:'—',stores:[],vehicleNo:'',eta:'17:00',vendor:'—',type:'24ft',storeIssues:[]};
     const r=map[key];
     // Look up store in master
     const storeName=(store||'').trim();
@@ -2733,13 +3044,13 @@ function bulkPreview() {
     const etaInputs=needEta.map(p=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--bdr2)">
       <span style="font-family:var(--mono);font-weight:800;font-size:12px;flex:1">${esc(p.vehicleNo)}</span>
       <span style="font-size:10px;color:var(--mut);flex:1">${esc(p.routeNo)}</span>
-      <input type="time" id="eta_${p.vehicleNo}" value="${p.eta||''}" required
+      <input type="time" id="eta_${p.vehicleNo}" value="${p.eta||'17:00'}" required
         style="background:${p.eta?'var(--sur2)':'var(--rdd)'};border:1px solid ${p.eta?'var(--bdr)':'var(--red)'};border-radius:5px;padding:4px 7px;color:var(--txt);font-family:var(--mono);font-size:12px;font-weight:700;outline:none;width:90px"
         oninput="this.style.background='var(--sur2)';this.style.borderColor='var(--bdr)'">
     </div>`).join('');
     pv.innerHTML+=`<div style="background:var(--sur);border:1px solid var(--acc);border-radius:var(--r);padding:11px 13px;margin-top:8px">
-      <div style="font-size:11px;font-weight:800;color:var(--acc);margin-bottom:4px">⏰ ETA required — vehicles not yet at GNSC</div>
-      <div style="font-size:10px;color:var(--mut);margin-bottom:8px">Enter expected arrival time for each vehicle. Can be updated later from Vehicles tab.</div>
+      <div style="font-size:11px;font-weight:800;color:var(--acc);margin-bottom:4px">⏰ ETA — defaults to 17:00, edit if different</div>
+      <div style="font-size:10px;color:var(--mut);margin-bottom:8px">Vehicles already inside GNSC don't need ETA. Can be updated later from Vehicles tab.</div>
       ${etaInputs}
     </div>`;
   }
@@ -2857,8 +3168,9 @@ function bulkUpload() {
   });
   const missingEta=needEta.filter(p=>{ const el=document.getElementById('eta_'+p.vehicleNo); return !el||!el.value; });
   if(missingEta.length) {
-    missingEta.forEach(p=>{ const el=document.getElementById('eta_'+p.vehicleNo); if(el){ el.style.background='var(--rdd)'; el.style.borderColor='var(--red)'; } });
-    toast('⚠️ Enter ETA for all vehicles before uploading','err'); return;
+    // Set default 17:00 for any missing ETAs instead of blocking
+    missingEta.forEach(p=>{ const el=document.getElementById('eta_'+p.vehicleNo); if(el) el.value='17:00'; });
+    if(missingEta.length) toast('⚠️ ETA defaulted to 17:00 for '+missingEta.length+' vehicle(s) — update from Vehicles tab');
   }
   let ra=0, va=0, sk=0, conflicts=[];
 
@@ -3114,9 +3426,88 @@ function renderMasters() {
         <div id="indent_stats" style="display:none;margin-top:8px"></div>
       </div>
     </div>
+
+    ${currentUser?.role==='admin'?`
+    <!-- DANGER ZONE — Admin only -->
+    <div style="background:var(--sur);border:1px solid var(--red);border-radius:var(--r);margin-bottom:8px;overflow:hidden">
+      <div onclick="toggleMaster('danger')" style="display:flex;align-items:center;justify-content:space-between;padding:10px 13px;cursor:pointer">
+        <div style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">⚠️</span><div><div style="font-weight:800;font-size:13px;color:var(--red)">Danger Zone</div><div style="font-size:10px;color:var(--mut)">Admin only — irreversible actions</div></div></div>
+        <span id="danger_arr" style="color:var(--dim);font-size:14px">▾</span>
+      </div>
+      <div id="danger_body" style="display:none;border-top:1px solid var(--red);padding:12px 13px">
+        <button onclick="clearData()" style="width:100%;padding:11px;background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px">🗑 Clear Today's Data — keep masters</button>
+        <button onclick="clearAll()" style="width:100%;padding:11px;background:var(--rdd);border:1px solid var(--red);color:var(--red);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">⚠️ Reset Everything — delete all data & masters</button>
+      </div>
+    </div>
+
+    <!-- USER MANAGEMENT — Admin only -->
+    <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);margin-bottom:8px;overflow:hidden">
+      <div onclick="toggleMaster('usr')" style="display:flex;align-items:center;justify-content:space-between;padding:10px 13px;cursor:pointer">
+        <div style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">👤</span><div><div style="font-weight:800;font-size:13px">User Management</div><div style="font-size:10px;color:var(--mut)">${Object.keys(appUsers).length} users</div></div></div>
+        <span id="usr_arr" style="color:var(--dim);font-size:14px">▾</span>
+      </div>
+      <div id="usr_body" style="display:none;border-top:1px solid var(--bdr);padding:12px 13px">
+        <div style="margin-bottom:10px">
+          ${Object.entries(appUsers).map(([u,d])=>`
+          <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bdr2)">
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:12px">${u}</div>
+              <div style="font-size:10px;color:var(--mut)">${d.role} · ${d.active!==false?'Active':'Inactive'}</div>
+            </div>
+            <button onclick="editUserMo('${u}')" style="background:var(--sur2);border:1px solid var(--bdr);color:var(--mut);border-radius:5px;padding:4px 9px;font-size:10px;font-weight:700;cursor:pointer">Edit</button>
+          </div>`).join('')}
+        </div>
+        <button onclick="addUserMo()" style="width:100%;padding:9px;background:var(--acc);color:#000;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer">➕ Add User</button>
+      </div>
+    </div>`:''}
+
     <div style="height:16px"></div>`;
 }
 
+function addUserMo() {
+  const roles=['leader','transport','warehouse','gate'];
+  oMo('➕ Add User',`
+    <div class="field"><label>Username</label><input id="nuUser" type="text" placeholder="username" autocapitalize="none" autocorrect="off"></div>
+    <div class="field"><label>Password</label><input id="nuPass" type="text" placeholder="password"></div>
+    <div class="field"><label>Role</label><select id="nuRole">${roles.map(r=>`<option value="${r}">${r}</option>`).join('')}</select></div>
+    <button class="btn-p" onclick="saveNewUser()">✅ Add User</button>
+    <button class="btn-s" onclick="cMo()">Cancel</button>
+  `);
+}
+function saveNewUser() {
+  const u=(document.getElementById('nuUser')?.value||'').trim().toLowerCase();
+  const p=(document.getElementById('nuPass')?.value||'').trim();
+  const r=document.getElementById('nuRole')?.value||'transport';
+  if(!u||!p){ toast('⚠️ Enter username and password','err'); return; }
+  if(appUsers[u]){ toast('⚠️ Username already exists','err'); return; }
+  appUsers[u]={password:p,role:r,name:u.charAt(0).toUpperCase()+u.slice(1),active:true};
+  saveAppUsers(); cMo(); toast('✅ User '+u+' added'); renderMasters();
+}
+function editUserMo(username) {
+  const u=appUsers[username]; if(!u) return;
+  const roles=['leader','transport','warehouse','gate','admin'];
+  oMo('✏️ Edit User — '+username,`
+    <div class="field"><label>Password</label><input id="euPass" type="text" value="${u.password}"></div>
+    <div class="field"><label>Role</label><select id="euRole">${roles.map(r=>`<option value="${r}"${r===u.role?' selected':''}>${r}</option>`).join('')}</select></div>
+    <div class="field"><label>Status</label><select id="euActive"><option value="true"${u.active!==false?' selected':''}>Active</option><option value="false"${u.active===false?' selected':''}>Inactive</option></select></div>
+    <button class="btn-p" onclick="saveEditUser('${username}')">✅ Save</button>
+    ${username!=='admin'?`<button class="btn-d" onclick="deleteUser('${username}')">🗑 Delete</button>`:''}
+    <button class="btn-s" onclick="cMo()">Cancel</button>
+  `);
+}
+function saveEditUser(username) {
+  const p=(document.getElementById('euPass')?.value||'').trim();
+  const r=document.getElementById('euRole')?.value;
+  const a=document.getElementById('euActive')?.value==='true';
+  if(!p){ toast('⚠️ Password cannot be empty','err'); return; }
+  appUsers[username]={...appUsers[username],password:p,role:r,active:a};
+  saveAppUsers(); cMo(); toast('✅ User updated'); renderMasters();
+}
+function deleteUser(username) {
+  if(!confirm('Delete user '+username+'?')) return;
+  delete appUsers[username];
+  saveAppUsers(); cMo(); toast('✅ User deleted'); renderMasters();
+}
 function toggleMaster(id) {
   const body=document.getElementById(id+'_body');
   const arr=document.getElementById(id+'_arr');
@@ -3250,7 +3641,20 @@ window.addEventListener('beforeinstallprompt', e => {
   }
 });
 // Start Firebase sync immediately when page loads
-document.addEventListener('DOMContentLoaded', ()=>{ startFirebaseSync(); });
+// Trigger checkDay when app becomes visible again (phone unlock, tab focus)
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible') {
+    TODAY=getToday();
+    const last=localStorage.getItem('gnsc_lastday');
+    if(last && last!==TODAY) { checkDay(); renderCOBan(); renderAll(); }
+  }
+});
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  startFirebaseSync();
+  // Auto-login if session exists
+  if(currentUser) launchApp();
+});
 
 window.addEventListener('appinstalled', () => {
   const ban = document.getElementById('installBan');
