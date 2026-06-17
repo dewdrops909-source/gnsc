@@ -417,6 +417,11 @@ function dockN(d)   { return typeof d==='object'?d.name:d; }
 // ─────────────────────────────────────────────
 let _fbListening=false, _ignoreNext=false;
 
+// Remove undefined values recursively — Firebase rejects them
+function sanitize(obj) {
+  return JSON.parse(JSON.stringify(obj, (k,v)=>v===undefined?null:v));
+}
+
 function save() {
   const cut=new Date(); cut.setDate(cut.getDate()-30);
   const cs=cut.toISOString().slice(0,10);
@@ -431,8 +436,11 @@ function save() {
   // Push to Firebase
   if(typeof db!=='undefined') {
     _ignoreNext=true;
-    db.ref('gnsc/live').set({routes,vehicles,actLog:actLog.slice(-200),dayHist,ts:Date.now()})
-      .catch(e=>console.warn('FB save:',e));
+    const payload=sanitize({routes,vehicles,actLog:actLog.slice(-200),dayHist,ts:Date.now()});
+    console.log('🔥 Pushing to Firebase — routes:'+routes.length+' vehicles:'+vehicles.length);
+    db.ref('gnsc/live').set(payload)
+      .then(()=>console.log('✅ Firebase push success'))
+      .catch(e=>{ console.error('❌ Firebase save error:',e); toast('⚠️ Sync error — check connection','err'); });
   }
 }
 function saveMasters() {
@@ -442,7 +450,7 @@ function saveMasters() {
   localStorage.setItem('gnsc_mtypes',   JSON.stringify(masterTypes));
   localStorage.setItem('gnsc_indent',   JSON.stringify(masterIndent));
   if(typeof db!=='undefined') {
-    db.ref('gnsc/masters').set({vehicles:masterVehicles,stores:masterStores,trans:masterTrans,types:masterTypes,indent:masterIndent})
+    db.ref('gnsc/masters').set(sanitize({vehicles:masterVehicles,stores:masterStores,trans:masterTrans,types:masterTypes,indent:masterIndent}))
       .catch(e=>console.warn('FB masters:',e));
   }
 }
@@ -2769,12 +2777,10 @@ function tomorrowPreview() {
 }
 function syncDaily() {
   if(typeof db==='undefined') return;
-  db.ref('gnsc/daily').update({
-    actualIndent: actualIndent,
-    indentDate: localStorage.getItem('gnsc_indent_date')||TODAY,
-    tomorrowPlan: tomorrowPlan||[],
-    docks: DOCKS||[]
-  }).catch(e=>console.warn('FB daily sync:',e));
+  db.ref('gnsc/daily').update(sanitize({
+    actualIndent, indentDate:localStorage.getItem('gnsc_indent_date')||TODAY,
+    tomorrowPlan:tomorrowPlan||[], docks:DOCKS||[]
+  })).catch(e=>console.warn('FB daily sync:',e));
 }
 function tomorrowUpload() {
   const parsed=window._tmrwParsed||[];
@@ -2843,11 +2849,14 @@ function bulkUpload() {
   const parsed=window._bulkParsed||[];
   if(!parsed.length){ toast('⚠️ Preview first','err'); return; }
 
-  // Check all ETAs are filled for vehicles not yet inside
-  const needEta=window._bulkNeedEta||[];
+  // Check all ETAs are filled for vehicles not yet inside GNSC
+  const needEta=(window._bulkNeedEta||[]).filter(p=>{
+    // Skip if vehicle is now inside GNSC (may have arrived after preview)
+    const v=vehicles.find(x=>x.number===p.vehicleNo&&['inside','dock','loaded'].includes(x.status));
+    return !v; // only need ETA if still not inside
+  });
   const missingEta=needEta.filter(p=>{ const el=document.getElementById('eta_'+p.vehicleNo); return !el||!el.value; });
   if(missingEta.length) {
-    // Highlight missing
     missingEta.forEach(p=>{ const el=document.getElementById('eta_'+p.vehicleNo); if(el){ el.style.background='var(--rdd)'; el.style.borderColor='var(--red)'; } });
     toast('⚠️ Enter ETA for all vehicles before uploading','err'); return;
   }
