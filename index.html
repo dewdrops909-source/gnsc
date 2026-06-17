@@ -451,7 +451,11 @@ function saveGateAlerts(alerts) {
   if(typeof db!=='undefined') db.ref('gnsc/gate_alerts').set(alerts).catch(e=>console.warn(e));
 }
 function startFirebaseSync() {
-  if(_fbListening||typeof db==='undefined') return;
+  if(_fbListening) return;
+  if(typeof firebase==='undefined'||typeof db==='undefined') {
+    console.warn('Firebase not loaded — running in offline mode');
+    return;
+  }
   _fbListening=true;
   // Live data listener
   db.ref('gnsc/live').on('value',snap=>{
@@ -485,10 +489,14 @@ function startFirebaseSync() {
   // Daily data listener (indent, tomorrow plan, docks)
   db.ref('gnsc/daily').on('value',snap=>{
     const d=snap.val(); if(!d) return;
-    if(d.actualIndent!==undefined){ actualIndent=d.actualIndent; localStorage.setItem('gnsc_actual_indent',String(d.actualIndent)); }
+    if(d.actualIndent!==undefined){
+      actualIndent=parseInt(d.actualIndent)||0;
+      localStorage.setItem('gnsc_actual_indent',String(actualIndent));
+    }
     if(d.indentDate)  localStorage.setItem('gnsc_indent_date',d.indentDate);
     if(d.tomorrowPlan){ tomorrowPlan=d.tomorrowPlan; localStorage.setItem('gnsc_tomorrow',JSON.stringify(tomorrowPlan)); }
     if(d.docks){ DOCKS=d.docks; localStorage.setItem('gnsc_docks',JSON.stringify(DOCKS)); }
+    // Always re-render so indent shows on all devices
     if(currentRole) renderAll();
   });
   // Gate alerts listener
@@ -857,15 +865,8 @@ function saveIndent() {
   localStorage.setItem('gnsc_actual_indent',String(val));
   localStorage.setItem('gnsc_indent_date',TODAY);
   log('TRANSPORT','📦 Actual indent: '+val+' batches','var(--acc)');
-  // Sync to Firebase so all devices see it
-  if(typeof db!=='undefined') {
-    db.ref('gnsc/daily').set({
-      actualIndent: val,
-      indentDate: TODAY,
-      tomorrowPlan: tomorrowPlan,
-      docks: DOCKS
-    }).catch(e=>console.warn('FB daily:',e));
-  }
+  save(); // sync actLog to Firebase
+  syncDaily(); // sync indent to Firebase
   cMo();
   toast('✅ Actual indent: '+val+' batches');
   switchTab('dashboard');
@@ -1162,8 +1163,13 @@ function renderRoutes() {
   const isDelay = r=>{ const s=lRS(r); if(['short','out','breakdown'].includes(s)) return false; return r.eta&&now>t2m(r.eta); };
 
   // Unplanned vehicles — gate added, transport needs to assign route
-  // Unplanned = gate inwarded, NOT in master, no route — transport must update master first
-  const unplanned=vehicles.filter(v=>v.isUnplanned&&!v.routeId&&v.status!=='out'&&(!masterLookup(v.number)||masterLookup(v.number).incomplete||masterLookup(v.number).vendor==='—'));
+  // Unplanned in routes tab = gate inwarded, in master WITH COMPLETE details, no route assigned
+  // Vehicles not in master or incomplete → only visible in Vehicles tab
+  const unplanned=vehicles.filter(v=>{
+    if(!v.isUnplanned||v.routeId||v.status==='out') return false;
+    const m=masterLookup(v.number);
+    return m && !m.incomplete && m.vendor && m.vendor!=='—' && m.type && m.type!=='—';
+  });
   let unplannedHtml='';
   if(unplanned.length&&currentRole==='transport') {
     unplannedHtml=`<div style="background:var(--ogd);border:2px solid var(--org);border-radius:var(--r);padding:11px 13px;margin-bottom:10px">
@@ -1179,7 +1185,12 @@ function renderRoutes() {
   // Includes carry-over and inside vehicles — they can be assigned to today's routes
   // Exclude only masterIncomplete vehicles (transport must update master first)
   // Pool: no route, in master with complete details — includes gate-inwarded vehicles if in master
-  const pool=vehicles.filter(v=>!v.routeId&&['planned','inside','dock','loaded'].includes(v.status)&&!v.masterIncomplete&&masterLookup(v.number)&&!masterLookup(v.number).incomplete);
+  const pool=vehicles.filter(v=>{
+    if(v.routeId||v.status==='out'||v.masterIncomplete) return false;
+    if(!['planned','inside','dock','loaded'].includes(v.status)) return false;
+    const m=masterLookup(v.number);
+    return m && !m.incomplete && m.vendor && m.vendor!=='—' && m.type && m.type!=='—';
+  });
   let poolHtml='';
   if(pool.length) {
     poolHtml=`<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:11px 13px;margin-bottom:12px">
@@ -2756,9 +2767,11 @@ function tomorrowPreview() {
 }
 function syncDaily() {
   if(typeof db==='undefined') return;
-  db.ref('gnsc/daily').set({
-    actualIndent, indentDate:localStorage.getItem('gnsc_indent_date')||TODAY,
-    tomorrowPlan, docks:DOCKS
+  db.ref('gnsc/daily').update({
+    actualIndent: actualIndent,
+    indentDate: localStorage.getItem('gnsc_indent_date')||TODAY,
+    tomorrowPlan: tomorrowPlan||[],
+    docks: DOCKS||[]
   }).catch(e=>console.warn('FB daily sync:',e));
 }
 function tomorrowUpload() {
