@@ -1178,21 +1178,10 @@ function renderRoutes() {
   // Unplanned vehicles — gate added, transport needs to assign route
   // Unplanned in routes tab = gate inwarded, in master WITH COMPLETE details, no route assigned
   // Vehicles not in master or incomplete → only visible in Vehicles tab
-  const unplanned=vehicles.filter(v=>{
-    if(!v.isUnplanned||v.routeId||v.status==='out') return false;
-    const m=masterLookup(v.number);
-    return m && !m.incomplete && m.vendor && m.vendor!=='—' && m.type && m.type!=='—';
-  });
+  // No unplanned section in routes tab
+  // Vehicles in master with no route → shown in Pool below
+  // Vehicles not in master → only visible in Vehicles tab
   let unplannedHtml='';
-  if(unplanned.length&&currentRole==='transport') {
-    unplannedHtml=`<div style="background:var(--ogd);border:2px solid var(--org);border-radius:var(--r);padding:11px 13px;margin-bottom:10px">
-      <div style="font-size:11px;font-weight:800;color:var(--org);margin-bottom:7px">⚠️ ${unplanned.length} Unplanned Arrival${unplanned.length>1?'s':''} at Gate — tap to assign route</div>
-      <div style="display:flex;flex-wrap:wrap;gap:5px">
-        ${unplanned.map(v=>`<div onclick="openPoolAssign('${v.id}')" style="background:var(--sur);border:1px solid var(--org);border-radius:7px;padding:6px 10px;cursor:pointer"><div style="font-family:var(--mono);font-weight:800;font-size:13px;color:var(--org)">${esc(v.number)}</div><div style="font-size:9px;color:var(--mut)">${esc(v.vendor!=='—'?v.vendor:'—')} · In GNSC ${v.times?.inside||'—'}</div></div>`).join('')}
-      </div>
-    </div>`;
-  }
-
   // Pool vehicles — unassigned, in system (planned or inside), in master
   // Pool = unassigned vehicles available for route assignment
   // Includes carry-over and inside vehicles — they can be assigned to today's routes
@@ -2941,6 +2930,7 @@ function bulkUpload() {
   const storeConflicts=conflicts.filter(c=>c.reason&&c.reason.includes('stores not in master'));
   if(storeConflicts.length) setTimeout(()=>alert('🚨 '+storeConflicts.length+' route(s) NOT created (stores not in master):\n\n'+storeConflicts.map(c=>c.rNo+' — '+c.reason).join('\n')+'\n\nAdd these stores to Store Master and re-upload.'),600);
   toast('✅ '+ra+' routes uploaded · '+va+' vehicles assigned'+(conflicts.filter(c=>c.reason?.includes('master')).length?' · '+conflicts.filter(c=>c.reason?.includes('master')).length+' Short (no master)':''));
+  saveMasters(); save(); // push to Firebase
   renderAll(); switchTab('plan');
 }
 
