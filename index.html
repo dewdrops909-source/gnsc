@@ -758,7 +758,16 @@ function updateStatus(vid, newStatus) {
     log(v.number,'🚨 Breakdown reported',SC.breakdown);
   } else {
     v.status=newStatus; v.times={...v.times,[newStatus]:nowTime()};
-    if(newStatus==='loaded') recLoadTime(v);
+    if(newStatus==='loaded') {
+      recLoadTime(v);
+      // Check if all vehicles are now loaded or departed — nothing pending
+      const pending=vehicles.filter(x=>!x.isCarryOver&&['inside','dock'].includes(x.status));
+      if(pending.length===0) {
+        const loadedCount=vehicles.filter(x=>x.status==='loaded'&&!x.isCarryOver).length;
+        pushNotifToAll('leader','📦 All Loading Complete — GNSC',
+          `All ${loadedCount} vehicles loaded and ready for dispatch`);
+      }
+    }
     const r=vR(v); if(r) r.status=newStatus;
     const msgs={inside:'🚛 Gate IN',dock:'🔋 At Dock',loaded:'📦 Loaded',out:'✅ Gate OUT'};
     log(v.number, msgs[newStatus]||newStatus, SC[newStatus]);
@@ -1010,6 +1019,9 @@ function sel(role) {
       if(el){ if(snap.val()){el.textContent='🔥 LIVE';el.style.color='var(--grn)';}else{el.textContent='○ OFFLINE';el.style.color='var(--red)';} }
     });
   }
+  // Start cross-device notification listener for all roles
+  requestNotificationPermission().then(()=>startNotifListener());
+
   // Gate alert polling
   if(role==='gate') {
     startAlertPoll();
@@ -2296,8 +2308,43 @@ function wAssignDock(vid, dock) {
 }
 
 // ─────────────────────────────────────────────
-// WAREHOUSE DOCK OVERSTAY ALERTS (push)
+// CROSS-DEVICE PUSH NOTIFICATIONS VIA FIREBASE
 // ─────────────────────────────────────────────
+let _lastNotifTs = 0; // prevent showing same notification twice
+
+function pushNotifToAll(role, title, body) {
+  // Write notification to Firebase — all devices with that role will pick it up
+  if(typeof db==='undefined') return;
+  const notif = sanitize({role, title, body, ts: Date.now()});
+  db.ref('gnsc/notifications').push(notif).catch(e=>console.warn('notif push:',e));
+}
+
+function startNotifListener() {
+  if(typeof db==='undefined') return;
+  db.ref('gnsc/notifications').on('value', snap=>{
+    const all = snap.val();
+    if(!all) return;
+    // Find newest notification for this role that we haven't shown yet
+    const entries = Object.values(all).filter(n=>
+      n.ts > _lastNotifTs &&
+      n.ts > Date.now() - 10000 && // only show if within last 10 seconds (fresh)
+      (n.role === currentRole || n.role === 'all')
+    );
+    entries.forEach(n=>{
+      sendPushNotification(n.title, n.body);
+      _lastNotifTs = Math.max(_lastNotifTs, n.ts);
+    });
+  });
+  // Clean up old notifications every hour
+  setInterval(()=>{
+    if(typeof db==='undefined') return;
+    db.ref('gnsc/notifications').once('value', snap=>{
+      const all=snap.val(); if(!all) return;
+      const cutoff=Date.now()-(60*60*1000); // 1 hour
+      Object.entries(all).forEach(([k,v])=>{ if(v.ts<cutoff) db.ref('gnsc/notifications/'+k).remove(); });
+    });
+  }, 60*60*1000);
+}
 let _dockAlertInterval=null;
 const _dockAlertSent=new Set(); // track which vehicles already got a push today
 
@@ -2308,7 +2355,7 @@ function checkDockOverstay() {
     if(!_dockAlertSent.has(key)) {
       _dockAlertSent.add(key);
       const mins=dockMins(v);
-      sendPushNotification(
+      pushNotifToAll('warehouse',
         `⚠️ Dock Overstay — ${v.number}`,
         `${esc(v.number)} has been on Dock ${v.dock} for ${mins} mins — over 1:15`
       );
@@ -2343,7 +2390,7 @@ function sendLeaderStatusPush() {
   const allDeparted=total>0&&todayVehicles.length>0&&todayVehicles.every(v=>v.status==='out');
 
   if(allDeparted) {
-    sendPushNotification(`✅ All Dispatched — ${now}`,
+    pushNotifToAll('leader', `✅ All Dispatched — ${now}`,
       `All ${departed} vehicles for today have departed. Dispatch complete!`);
     toast(`✅ All dispatched — final push sent`);
     stopLeaderStatusPush();
@@ -2360,7 +2407,7 @@ function sendLeaderStatusPush() {
   if(departed) parts.push(`✅ ${departed} departed`);
   if(broke)    parts.push(`🚨 ${broke} breakdown`);
 
-  sendPushNotification(`GNSC Status — ${now}`, parts.join(' · '));
+  pushNotifToAll('leader', `GNSC Status — ${now}`, parts.join(' · '));
   toast(`📊 Status push sent — ${now}`);
 }
 
@@ -2477,9 +2524,9 @@ function checkGateAlerts() {
       </div>
       <button onclick="ackGateAlert('${a.id||a.vid}')" style="background:#000;color:var(--acc);border:none;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0">✓ Done</button>
     </div>${alerts.indexOf(a)<alerts.length-1?'<div style="border-top:1px solid rgba(0,0,0,.2)"></div>':''}`).join('');
-  // Send push notification for background alerts
+  // Send push notification for background alerts to all gate devices
   alerts.forEach(a=>{
-    sendPushNotification(
+    pushNotifToAll('gate',
       a.type==='loaded'?'📦 Clear Dock — GNSC':'📢 Dock Alert — GNSC',
       a.type==='loaded'?`Remove ${a.vnum} from Dock ${a.dock}`:`Place ${a.vnum} on Dock ${a.dock}`
     );
