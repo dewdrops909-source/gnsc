@@ -27,16 +27,97 @@ const db = firebase.database();
 </script>
 <title>GNSC · Vehicle Tracker</title>
 <script>
-// Register service worker for offline + installability
+// Register enhanced service worker for background notifications
 if('serviceWorker' in navigator) {
+  const FIREBASE_DB = 'https://gnsc-tracker-default-rtdb.asia-southeast1.firebasedatabase.app';
   const sw = `
-    self.addEventListener('install', e=>{ e.waitUntil(caches.open('gnsc-v1').then(c=>c.addAll([location.href]))); });
-    self.addEventListener('fetch', e=>{ e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).catch(()=>caches.match(location.href)))); });
+    const CACHE = 'gnsc-v2';
+    const DB_URL = '${FIREBASE_DB}';
+    let lastNotifTs = 0;
+    let currentRole = null;
+
+    // Cache for offline
+    self.addEventListener('install', e=>{
+      self.skipWaiting();
+    });
+    self.addEventListener('activate', e=>{
+      e.waitUntil(clients.claim());
+    });
+    self.addEventListener('fetch', e=>{
+      e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));
+    });
+
+    // Receive role from main app
+    self.addEventListener('message', e=>{
+      if(e.data?.type==='SET_ROLE') {
+        currentRole = e.data.role;
+        lastNotifTs = e.data.ts || 0;
+      }
+    });
+
+    // Background sync — poll Firebase for notifications
+    self.addEventListener('periodicsync', e=>{
+      if(e.tag==='gnsc-notif-sync') e.waitUntil(checkNotifications());
+    });
+
+    // Also check on push (if FCM is set up later)
+    self.addEventListener('push', e=>{
+      const data = e.data?.json() || {};
+      e.waitUntil(self.registration.showNotification(data.title||'GNSC Alert', {
+        body: data.body||'',
+        icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23F4A228'/%3E%3Ctext x='32' y='44' font-size='36' text-anchor='middle' font-family='monospace' font-weight='bold' fill='%23000'%3EG%3C/text%3E%3C/svg%3E",
+        badge: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23F4A228'/%3E%3C/svg%3E",
+        requireInteraction: true,
+        tag: 'gnsc-alert'
+      }));
+    });
+
+    // Notification click → open app
+    self.addEventListener('notificationclick', e=>{
+      e.notification.close();
+      e.waitUntil(clients.matchAll({type:'window'}).then(cs=>{
+        if(cs.length) return cs[0].focus();
+        return clients.openWindow('/gnsc/');
+      }));
+    });
+
+    async function checkNotifications() {
+      if(!currentRole) return;
+      try {
+        const res = await fetch(DB_URL+'/gnsc/notifications.json?orderBy=%22ts%22&startAt='+lastNotifTs+'&limitToLast=10');
+        const data = await res.json();
+        if(!data) return;
+        const entries = Object.values(data).filter(n=>
+          n.ts > lastNotifTs &&
+          (n.role === currentRole || n.role === 'all')
+        );
+        for(const n of entries) {
+          await self.registration.showNotification(n.title, {
+            body: n.body,
+            icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23F4A228'/%3E%3Ctext x='32' y='44' font-size='36' text-anchor='middle' font-family='monospace' font-weight='bold' fill='%23000'%3EG%3C/text%3E%3C/svg%3E",
+            badge: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23F4A228'/%3E%3C/svg%3E",
+            requireInteraction: true,
+            tag: 'gnsc-'+n.ts
+          });
+          lastNotifTs = Math.max(lastNotifTs, n.ts);
+        }
+      } catch(e) { console.warn('SW notif check failed:', e); }
+    }
   `;
   const blob = new Blob([sw], {type:'application/javascript'});
   const url  = URL.createObjectURL(blob);
-  navigator.serviceWorker.register(url).catch(()=>{});
+  navigator.serviceWorker.register(url).then(reg=>{
+    // Register periodic sync if supported (Android Chrome)
+    if('periodicSync' in reg) {
+      navigator.permissions.query({name:'periodic-background-sync'}).then(status=>{
+        if(status.state==='granted') {
+          reg.periodicSync.register('gnsc-notif-sync', {minInterval: 60*1000}); // every 1 min
+        }
+      }).catch(()=>{});
+    }
+  }).catch(()=>{});
 }
+
 // PWA manifest injected inline
 const manifest = {
   name: 'GNSC Vehicle Tracker',
@@ -1020,7 +1101,13 @@ function sel(role) {
     });
   }
   // Start cross-device notification listener for all roles
-  requestNotificationPermission().then(()=>startNotifListener());
+  requestNotificationPermission().then(()=>{
+    startNotifListener();
+    // Tell service worker which role this device is logged in as
+    if('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({type:'SET_ROLE', role, ts: Date.now()-10000});
+    }
+  });
 
   // Gate alert polling
   if(role==='gate') {
