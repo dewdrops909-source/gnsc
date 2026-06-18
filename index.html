@@ -515,10 +515,13 @@ function sanitize(obj) {
 }
 
 function save() {
-  const cut=new Date(); cut.setDate(cut.getDate()-30);
-  const cs=cut.toISOString().slice(0,10);
-  actLog  =actLog.filter(a=>!a.date||a.date>=cs);
-  loadHist=loadHist.filter(h=>!h.date||h.date>=cs);
+  // actLog: keep last 24 hours only
+  const cutTs=Date.now()-(24*60*60*1000);
+  actLog=actLog.filter(a=>!a.ts||a.ts>=cutTs);
+  // loadHist & dayHist: keep 30 days for analytics
+  const cut30=new Date(); cut30.setDate(cut30.getDate()-30);
+  const cs30=cut30.toISOString().slice(0,10);
+  loadHist=loadHist.filter(h=>!h.date||h.date>=cs30);
   localStorage.setItem('gnsc_routes',   JSON.stringify(routes));
   localStorage.setItem('gnsc_vehicles', JSON.stringify(vehicles));
   localStorage.setItem('gnsc_actlog',   JSON.stringify(actLog));
@@ -628,7 +631,7 @@ function startFirebaseSync() {
   console.log('%c🔥 Firebase sync active','color:#F4A228;font-weight:bold');
 }
 function log(who, msg, color) {
-  actLog.unshift({who, msg, time:nowTime(), color:color||'var(--acc)', date:TODAY});
+  actLog.unshift({who, msg, time:nowTime(), color:color||'var(--acc)', date:TODAY, ts:Date.now()});
   if(actLog.length>500) actLog.pop();
 }
 function toast(msg, type='') {
@@ -781,10 +784,28 @@ function snapshotDay(date) {
 }
 
 function checkDay() {
-  TODAY = getToday(); // always use current date
+  TODAY = getToday();
   const last = localStorage.getItem('gnsc_lastday');
-  // Run if: never set before, OR date has changed
-  if(!last || last!==TODAY) {
+
+  // GUARD 1: If already processed today on this device, skip
+  if(last===TODAY) return;
+
+  // GUARD 2: If Firebase already has today's data, just update lastday locally — don't reset
+  const hasToday = routes.some(r=>r.date===TODAY) || vehicles.some(v=>v.date===TODAY);
+  if(hasToday) {
+    localStorage.setItem('gnsc_lastday', TODAY);
+    console.log('checkDay: today data exists — skipping reset');
+    return;
+  }
+
+  // GUARD 3: No previous day recorded (fresh device) and no data at all — nothing to reset
+  if(!last && routes.length===0 && vehicles.length===0) {
+    localStorage.setItem('gnsc_lastday', TODAY);
+    return;
+  }
+
+  // Only reach here if: last day was recorded AND it's different from today AND no today's data exists
+  console.log('checkDay: running day reset from', last, '→', TODAY);
     snapshotDay(last); // save yesterday's data before clearing
 
     // ── Step 1: Identify physical state of all vehicles ──────────────────
@@ -794,26 +815,23 @@ function checkDay() {
     // Vehicles that never arrived (planned only) → remove entirely
     // departed → kept for 2hr rule via autoArchive
 
-    // ── Step 2: Clear all routes (fresh plan) ────────────────────────────
+    // ── Step 2: Save old routes then clear ──────────────────────────────
+    const oldRoutes = [...routes];
     routes = [];
 
     // ── Step 3: Keep all vehicles in their exact state ───────────────────
     vehicles = vehicles.filter(v => {
-      if(v.status === 'out') return false;           // departed — remove at midnight
-      if(v.status === 'planned') {
-        v.isCarryOver = true;
-        v.carryOverDate = last;
-        return true;                                 // planned never arrived → carry-over Short
-      }
-      if(['inside','dock','loaded'].includes(v.status)) return true; // stays as-is, same state, same route
+      if(v.status === 'out') return false;
+      if(v.status === 'planned') { v.isCarryOver=true; v.carryOverDate=last; return true; }
+      if(['inside','dock','loaded'].includes(v.status)) return true;
       return false;
     });
 
-    // Carry-over routes — planned vehicles keep their route but show as carry-over Short
-    routes = routes.filter(r => {
+    // Carry-over routes from old routes (not the empty array)
+    routes = oldRoutes.filter(r => {
       const v = vehicles.find(x => x.id === r.vehicleId);
-      if(v && v.isCarryOver) { r.isCarryOver = true; r.carryOverDate = last; return true; } // planned carry-over
-      if(['inside','dock','loaded'].includes(rSt(r))) { r.isCarryOver = true; r.carryOverDate = last; return true; } // physical carry-over
+      if(v && v.isCarryOver) { r.isCarryOver=true; r.carryOverDate=last; return true; }
+      if(['inside','dock','loaded'].includes(rSt(r))) { r.isCarryOver=true; r.carryOverDate=last; return true; }
       return false;
     });
 
@@ -866,9 +884,8 @@ function checkDay() {
 
     save();
     syncDaily();
-    // Push lastday to Firebase so all devices know day has changed
     if(typeof db!=='undefined') db.ref('gnsc/daily/lastday').set(TODAY).catch(e=>console.warn(e));
-  }
+
   localStorage.setItem('gnsc_lastday',TODAY);
   autoArchive();
 }
@@ -965,8 +982,15 @@ function sel(role) {
     setInterval(tick,60000);
     setInterval(updateCutBan,30000);
     setInterval(()=>{ TODAY=getToday(); if(currentRole){autoArchive();renderAll();updateCutBan();} },60000);
-    // Check for day change every minute (catches missed midnight even if phone was sleeping)
-    setInterval(()=>{ const last=localStorage.getItem('gnsc_lastday'); if(last&&last!==getToday()){ TODAY=getToday(); checkDay(); renderCOBan(); renderAll(); } },60000);
+    // Check for day change every minute — only reset if no today's data exists yet
+    setInterval(()=>{ 
+      const last=localStorage.getItem('gnsc_lastday'); 
+      if(last&&last!==getToday()){ 
+        const hasToday=routes.some(r=>r.date===getToday())||vehicles.some(v=>v.date===getToday());
+        if(!hasToday){ TODAY=getToday(); checkDay(); renderCOBan(); renderAll(); }
+        else { localStorage.setItem('gnsc_lastday',getToday()); }
+      } 
+    },60000);
   }
   // Firebase connection status
   if(typeof db!=='undefined') {
@@ -3646,7 +3670,12 @@ document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='visible') {
     TODAY=getToday();
     const last=localStorage.getItem('gnsc_lastday');
-    if(last && last!==TODAY) { checkDay(); renderCOBan(); renderAll(); }
+    if(last && last!==TODAY) {
+      // Only reset if no today's data exists yet
+      const hasToday=routes.some(r=>r.date===TODAY)||vehicles.some(v=>v.date===TODAY);
+      if(!hasToday) { checkDay(); renderCOBan(); renderAll(); }
+      else { localStorage.setItem('gnsc_lastday',TODAY); }
+    }
   }
 });
 
