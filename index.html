@@ -407,6 +407,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--txt);min-he
     <button onclick="adminView('transport')" id="av-transport" style="border:none;border-radius:6px;padding:5px 10px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;background:var(--sur);color:var(--mut)">🚛 Transport</button>
     <button onclick="adminView('warehouse')" id="av-warehouse" style="border:none;border-radius:6px;padding:5px 10px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;background:var(--sur);color:var(--mut)">📦 Warehouse</button>
     <button onclick="adminView('gate')"      id="av-gate"      style="border:none;border-radius:6px;padding:5px 10px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;background:var(--sur);color:var(--mut)">🛡️ Gate</button>
+    <button onclick="adminView('pilot')"     id="av-pilot"     style="border:none;border-radius:6px;padding:5px 10px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;background:var(--sur);color:var(--mut)">🚗 Pilot</button>
   </div>
   <div id="coBan"></div>
   <div id="cutBan" class="cut-ban cb-ok"></div>
@@ -419,7 +420,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--txt);min-he
   <div id="pg-vehicles"   class="page"></div>
   <div id="pg-analytics"  class="page"></div>
   <div id="pg-details"    class="page"></div>
-  <div id="pg-plan"       class="page"></div>
+  <div id="pg-pilot"       class="page"></div>
+  <div id="pg-prechill"    class="page"></div>
   <div id="pg-update"    class="page"></div>
   <div id="pg-add"       class="page"></div>
   <div id="pg-masters"   class="page"></div>
@@ -484,7 +486,8 @@ const DEFAULT_USERS = {
   leader:    { password:'leader123',    role:'leader',    name:'Leader' },
   warehouse: { password:'warehouse123', role:'warehouse', name:'Warehouse' },
   gate:      { password:'gate123',      role:'gate',      name:'Gate' },
-  transport: { password:'transport123', role:'transport', name:'Transport' }
+  transport: { password:'transport123', role:'transport', name:'Transport' },
+  pilot:     { password:'pilot123',     role:'pilot',     name:'Pilot' }
 };
 let appUsers = JSON.parse(localStorage.getItem('gnsc_users')||'{}');
 // Merge defaults with any saved users
@@ -541,7 +544,7 @@ function adminView(role) {
 }
 
 function updateAdminToggle(activeRole) {
-  ['leader','transport','warehouse','gate'].forEach(r=>{
+  ['leader','transport','warehouse','gate','pilot'].forEach(r=>{
     const btn=document.getElementById('av-'+r);
     if(btn) {
       btn.style.background=r===activeRole?'var(--acc)':'var(--sur)';
@@ -558,9 +561,10 @@ function saveAppUsers() {
 const ROLE_TABS = {
   admin:     [{id:'dashboard',ic:'📊',lb:'OVERVIEW'},{id:'fleet',ic:'🚛',lb:'FLEET'},{id:'routes',ic:'📍',lb:'ROUTES'},{id:'vehicles',ic:'🚛',lb:'VEHICLES'},{id:'details',ic:'📋',lb:'DETAILS'},{id:'plan',ic:'📤',lb:'PLAN'},{id:'update',ic:'🔄',lb:'UPDATE'},{id:'add',ic:'➕',lb:'ADD'},{id:'masters',ic:'🗂️',lb:'MASTERS'},{id:'analytics',ic:'📈',lb:'ANALYTICS'},{id:'log',ic:'📋',lb:'LOG'}],
   leader:    [{id:'dashboard',ic:'📊',lb:'OVERVIEW'},{id:'fleet',ic:'🚛',lb:'FLEET'},{id:'analytics',ic:'📈',lb:'ANALYTICS'}],
-  warehouse: [{id:'whdash',ic:'📊',lb:'OVERVIEW'},{id:'docks',ic:'🔋',lb:'DOCKS'},{id:'details',ic:'📋',lb:'DETAILS'},{id:'update',ic:'🔄',lb:'UPDATE'},{id:'log',ic:'📋',lb:'LOG'}],
+  warehouse: [{id:'whdash',ic:'📊',lb:'OVERVIEW'},{id:'prechill',ic:'❄️',lb:'PRECHILL'},{id:'docks',ic:'🔋',lb:'DOCKS'},{id:'details',ic:'📋',lb:'DETAILS'},{id:'update',ic:'🔄',lb:'UPDATE'},{id:'log',ic:'📋',lb:'LOG'}],
   transport: [{id:'dashboard',ic:'📊',lb:'OVERVIEW'},{id:'fleet',ic:'🚛',lb:'FLEET'},{id:'routes',ic:'📍',lb:'ROUTES'},{id:'vehicles',ic:'🚛',lb:'VEHICLES'},{id:'details',ic:'📋',lb:'DETAILS'},{id:'plan',ic:'📤',lb:'PLAN'},{id:'update',ic:'🔄',lb:'UPDATE'},{id:'add',ic:'➕',lb:'ADD'},{id:'masters',ic:'🗂️',lb:'MASTERS'},{id:'log',ic:'📋',lb:'LOG'}],
   gate:      [{id:'update',ic:'🛡️',lb:'GATE'}],
+  pilot:     [{id:'pilot',ic:'🚗',lb:'PILOT'}],
 };
 
 const ROLE_INFO = {
@@ -568,6 +572,7 @@ const ROLE_INFO = {
   warehouse: {icon:'📦', name:'Warehouse', cls:'rc-w'},
   transport: {icon:'🚛', name:'Transport', cls:'rc-t'},
   gate:      {icon:'🛡️', name:'Gate',      cls:'rc-g'},
+  pilot:     {icon:'🚗', name:'Pilot',     cls:'rc-p'},
 };
 
 // ─────────────────────────────────────────────
@@ -682,10 +687,10 @@ function startFirebaseSync() {
   // Daily data listener (indent, tomorrow plan, docks, lastday)
   db.ref('gnsc/daily').on('value',snap=>{
     const d=snap.val(); if(!d) return;
-    // If Firebase says a new day has started, trigger checkDay on this device too
-    if(d.lastday && d.lastday!==localStorage.getItem('gnsc_lastday') && d.lastday===getToday()) {
+    // If lastday is set (today or tomorrow for early activation), update local
+    if(d.lastday && d.lastday!==localStorage.getItem('gnsc_lastday')) {
       localStorage.setItem('gnsc_lastday', d.lastday);
-      // Don't run checkDay again — Firebase live listener will bring the reset data
+      console.log('checkDay: lastday synced from Firebase →', d.lastday);
     }
     if(d.actualIndent!==undefined){
       actualIndent=parseInt(d.actualIndent)||0;
@@ -829,8 +834,12 @@ function updateStatus(vid, newStatus) {
   // When marking loaded → alert gate to remove from dock
   if(newStatus==='loaded' && v.dock && v.dock!=='—') {
     const alerts=getGateAlerts().filter(a=>a.vid!==vid);
-    alerts.unshift({vid,vnum:v.number,dock:v.dock,time:nowTime(),ts:Date.now(),ack:false,sentBy:'Warehouse',type:'loaded',msg:'Loaded — clear from dock'});
-    saveGateAlerts(alerts.slice(0,20)); // syncs to Firebase so gate devices get it
+    alerts.unshift({id:Date.now().toString(36),vid,vnum:v.number,dock:v.dock,time:nowTime(),ts:Date.now(),ack:false,sentBy:'Warehouse',type:'loaded',msg:'Loaded — clear from dock'});
+    saveGateAlerts(alerts.slice(0,20));
+    pushNotifToAll('gate','📦 Clear Dock — GNSC',`Remove ${v.number} from Dock ${v.dock}`);
+    pushNotifToAll('pilot','📦 Clear Dock — GNSC',`Remove ${v.number} from Dock ${v.dock}`);
+    // Remove prechill flag when loaded
+    if(v.prechill) { v.prechill=false; v.prechillConfirmed=false; }
   }
   if(newStatus==='breakdown') {
     v.prevStatus=v.status; v.status='breakdown';
@@ -873,17 +882,42 @@ function snapshotDay(date) {
   dayHist=dayHist.filter(d=>{ const dd=new Date(d.date),now=new Date(); return (now-dd)/(1000*60*60*24)<=30; }); // keep 30 days
 }
 
+function markCarryOvers(todayDate) {
+  // Mark any vehicles/routes from a previous date as carry-over (YDAY flag)
+  // without resetting or clearing anything
+  let changed=false;
+  vehicles.forEach(v=>{
+    if(v.date && v.date<todayDate && !v.isCarryOver && v.status!=='out') {
+      v.isCarryOver=true;
+      v.carryOverDate=v.date;
+      changed=true;
+    }
+  });
+  routes.forEach(r=>{
+    if(r.date && r.date<todayDate && !r.isCarryOver) {
+      r.isCarryOver=true;
+      r.carryOverDate=r.date;
+      changed=true;
+    }
+  });
+  if(changed) { save(); console.log('markCarryOvers: old vehicles/routes flagged as YDAY'); }
+}
 function checkDay() {
   TODAY = getToday();
   const last = localStorage.getItem('gnsc_lastday');
 
   // GUARD 1: If already processed today on this device, skip
-  if(last===TODAY) return;
+  if(last===TODAY) {
+    // Still mark any old-date vehicles as carry-over (for early activation scenario)
+    markCarryOvers(last);
+    return;
+  }
 
   // GUARD 2: If Firebase already has today's data, just update lastday locally — don't reset
   const hasToday = routes.some(r=>r.date===TODAY) || vehicles.some(v=>v.date===TODAY);
   if(hasToday) {
     localStorage.setItem('gnsc_lastday', TODAY);
+    markCarryOvers(TODAY);
     console.log('checkDay: today data exists — skipping reset');
     return;
   }
@@ -986,15 +1020,15 @@ function autoArchive() {
     if(v.status!=='out') return true;
     const outM=t2m(v.times?.out||'00:00');
     const elapsed=now>=outM?now-outM:1440-outM+now;
-    if(v.isCarryOver) return elapsed<120;  // carry-over: 2hr rule always
-    // Today's departed vehicles:
-    // If departed before midnight (outM > 0, meaning a real time was set today)
-    // Keep until midnight — checkDay handles removal
-    // If departed after midnight (early hours, outM is small like 0:05-6:00)
-    // Remove 2hrs after departure
-    const isPostMidnight = outM < t2m('06:00'); // departed after midnight, before 6am
-    if(isPostMidnight) return elapsed < 120;
-    return true; // departed during the day — keep until midnight (checkDay removes)
+    // Carry-over departed: always 2hr rule
+    if(v.isCarryOver) return elapsed<120;
+    // Early-activation: vehicle from previous date → 2hr rule
+    if(v.date && v.date<TODAY) return elapsed<120;
+    // Post-midnight departure (before 6am): 2hr rule
+    const isPostMidnight = outM < t2m('06:00');
+    if(isPostMidnight) return elapsed<120;
+    // Normal day departure: keep until midnight (checkDay removes)
+    return true;
   });
   routes=routes.filter(r=>!r.vehicleId||!!vehicles.find(v=>v.id===r.vehicleId));
 }
@@ -1109,8 +1143,8 @@ function sel(role) {
     }
   });
 
-  // Gate alert polling
-  if(role==='gate') {
+  // Gate alert polling — gate AND pilot
+  if(role==='gate'||role==='pilot') {
     startAlertPoll();
     requestNotificationPermission();
   } else stopAlertPoll();
@@ -1197,7 +1231,8 @@ function renderPage(tab) {
   else if(tab==='vehicles') renderVehicles();
   else if(tab==='analytics') renderAnalytics();
   else if(tab==='details')  renderDetails();
-  else if(tab==='plan')     renderPlan();
+  else if(tab==='pilot')    renderPilot();
+  else if(tab==='prechill') renderPrechill();
   else if(tab==='update')  renderUpdate();
   else if(tab==='add')     renderAdd();
   else if(tab==='masters') renderMasters();
@@ -1301,12 +1336,31 @@ function renderDash() {
   const indentPlanned = masterIndent[TODAY]||0;
   const indentActual  = actualIndent||0;
 
+  // Yesterday carry-overs
+  const ydayRoutes   = routes.filter(r=>r.isCarryOver);
+  const ydayVehicles = vehicles.filter(v=>v.isCarryOver);
+  const ydayInside   = ydayVehicles.filter(v=>['inside','dock','loaded'].includes(v.status));
+  const ydayShort    = ydayRoutes.filter(r=>rSt(r)==='short'||!r.vehicleId);
+  const ydayWithV    = ydayRoutes.filter(r=>r.vehicleId&&['inside','dock','loaded'].includes(vehicles.find(x=>x.id===r.vehicleId)?.status||''));
+
   el.innerHTML=`
     <div class="pg-h"><div><div class="pg-t">Today's Overview</div><div class="pg-s">${total} routes planned · ${inGNSC.length} in GNSC · ${out.length} departed</div></div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
       <div class="pg-time">${nowTime()}</div>
       <button onclick="sendLeaderStatusPush()" style="background:transparent;border:1px solid var(--bdr);color:var(--dim);border-radius:6px;padding:3px 8px;font-size:9px;font-weight:700;cursor:pointer">📊 Push Now</button>
     </div></div>
+
+    ${ydayRoutes.length?`
+    <div style="background:var(--ogd);border:1px solid var(--org);border-radius:var(--r);padding:11px 13px;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:800;color:var(--org);margin-bottom:8px">📅 Yesterday's Pendencies — ${ydayRoutes.length} carry-over${ydayRoutes.length>1?'s':''}</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+        <div class="sc" style="border-color:var(--org)"><div class="sc-n" style="color:var(--org);font-size:20px">${ydayRoutes.length}</div><div class="sc-l">Routes</div></div>
+        <div class="sc" style="${ydayInside.length?'border-color:var(--blu)':''}"><div class="sc-n" style="color:${ydayInside.length?'var(--blu)':'var(--dim)'};font-size:20px">${ydayInside.length}</div><div class="sc-l">In GNSC</div></div>
+        <div class="sc" style="${ydayShort.length?'border-color:var(--red)':''}"><div class="sc-n" style="color:${ydayShort.length?'var(--red)':'var(--dim)'};font-size:20px">${ydayShort.length}</div><div class="sc-l">Short</div></div>
+      </div>
+      ${ydayRoutes.slice(0,5).map(r=>{const v=rV(r);return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,165,0,.2);font-size:11px"><span style="font-weight:700;color:var(--org)">${esc(r.routeNo)}</span><span style="color:var(--mut)">${esc(r.city)}</span><span style="font-family:var(--mono);font-size:10px;color:${v?'var(--blu)':'var(--red)'}"">${v?v.number:'No Vehicle'}</span><span class="yday">YDAY</span></div>`;}).join('')}
+      ${ydayRoutes.length>5?`<div style="font-size:10px;color:var(--org);text-align:center;padding-top:5px">+${ydayRoutes.length-5} more</div>`:''}
+    </div>`:''}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
       <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:20px;padding:6px 14px;display:inline-flex;align-items:baseline;gap:8px">
         <span style="font-size:10px;font-weight:700;color:var(--mut)">📦 Indent</span>
@@ -1533,7 +1587,7 @@ function renderRoutes() {
             <div style="font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.stores?.join(' · ')||'—'}</div>
           </div>
           <div style="min-width:0">
-            ${v?`<div style="font-family:var(--mono);font-size:11px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(v.number)}${yd}</div><div style="font-size:9px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(v.vendor&&v.vendor!=='—'?v.vendor:'—')}</div>`
+            ${v?`<div style="font-family:var(--mono);font-size:11px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(v.number)}${yd}${prechillBadge(v)}</div><div style="font-size:9px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(v.vendor&&v.vendor!=='—'?v.vendor:'—')}</div>`
               :`<div style="font-size:10px;color:var(--org);font-weight:700">⚠️ No vehicle</div>${currentRole==='transport'?`<div style="font-size:9px;color:var(--org);cursor:pointer" onclick="event.stopPropagation();openAssignMo('${r.id}')">Assign →</div>`:''}`}
           </div>
           <div style="font-family:var(--mono);font-size:11px;color:var(--mut);font-weight:700">${esc(r.eta)||'—'}</div>
@@ -1671,12 +1725,70 @@ function confirmOut(vid) {
   const v=vehicles.find(x=>x.id===vid); if(!v) return;
   const r=vR(v); cMo();
   setTimeout(()=>oMo('Confirm Gate OUT',`
-    <div style="background:var(--sur2);border-radius:8px;padding:12px;margin-bottom:14px">
+    <div style="background:var(--sur2);border-radius:8px;padding:12px;margin-bottom:12px">
       <div style="font-family:var(--mono);font-size:18px;font-weight:800;color:var(--acc)">${esc(v.number)}</div>
       ${r?`<div style="font-size:11px;color:var(--mut);margin-top:3px">${esc(r.city)} · ${r.stores?.length||0} stores</div>`:''}
     </div>
-    <button class="act-btn" style="background:var(--acc);color:#000" onclick="updateStatus('${vid}','out');cMo();setTimeout(()=>{const tv=vehicles.filter(v=>!v.isCarryOver);if(tv.length>0&&tv.every(v=>v.status==='out'))sendLeaderStatusPush();},500)">✅ Confirm Gate OUT</button>
-    <button class="btn-s" onclick="cMo()">Cancel</button>`),200);
+    <div class="field" style="margin-bottom:14px">
+      <label style="font-size:11px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:.5px">🌡️ Vehicle Temperature (°C)</label>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+        <input type="number" id="gateTemp" step="0.1" placeholder="e.g. 2.5"
+          style="flex:1;background:var(--sur2);border:2px solid var(--bdr);border-radius:8px;padding:12px 14px;color:var(--txt);font-family:var(--mono);font-size:18px;font-weight:800;outline:none;text-align:center"
+          oninput="checkTempColor(this)">
+        <span style="font-size:13px;font-weight:700;color:var(--mut)">°C</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:5px;font-size:10px;color:var(--mut)">
+        <span>Acceptable range: <strong style="color:var(--grn)">-2°C to 4°C</strong></span>
+        <span id="tempStatus"></span>
+      </div>
+    </div>
+    <button class="act-btn" style="background:var(--acc);color:#000" onclick="doGateOut('${vid}')">✅ Confirm Gate OUT</button>
+    <button class="btn-s" onclick="cMo()">Cancel</button>
+  `),200);
+}
+function checkTempColor(inp) {
+  const t=parseFloat(inp.value);
+  const status=document.getElementById('tempStatus');
+  if(isNaN(t)) { inp.style.borderColor='var(--bdr)'; if(status) status.textContent=''; return; }
+  if(t>=-2&&t<=4) {
+    inp.style.borderColor='var(--grn)';
+    if(status) { status.textContent='✅ Within range'; status.style.color='var(--grn)'; }
+  } else {
+    inp.style.borderColor='var(--red)';
+    if(status) { status.textContent='⚠️ Out of range!'; status.style.color='var(--red)'; }
+  }
+}
+function doGateOut(vid) {
+  const v=vehicles.find(x=>x.id===vid); if(!v) return;
+  const tempInput=document.getElementById('gateTemp');
+  const temp=parseFloat(tempInput?.value||'');
+
+  if(isNaN(temp)) { toast('⚠️ Enter vehicle temperature before gate out','err'); return; }
+
+  const inRange=temp>=-2&&temp<=4;
+
+  if(!inRange) {
+    // Send alert to transport but still do gate out
+    const r=vR(v);
+    const msg=`🌡️ Temp Alert: ${v.number} departed at ${temp}°C (outside -2 to 4°C range)${r?' · '+r.city:''}`;
+    pushNotifToAll('transport','⚠️ Temperature Alert — '+v.number, `Departed at ${temp}°C — outside acceptable range (-2°C to 4°C)${r?' · '+r.city:''}`);
+    log(v.number, msg,'var(--red)');
+    toast('⚠️ Temp alert sent to transport — doing Gate OUT');
+  } else {
+    log(v.number,`🌡️ Temp OK: ${temp}°C · Gate OUT`,'var(--grn)');
+  }
+
+  // Record temp on vehicle
+  v.temp=temp;
+  v.tempOk=inRange;
+
+  // Do gate out
+  updateStatus(vid,'out');
+  cMo();
+  setTimeout(()=>{
+    const tv=vehicles.filter(v=>!v.isCarryOver);
+    if(tv.length>0&&tv.every(v=>v.status==='out')) sendLeaderStatusPush();
+  },500);
 }
 function resolveBreak(vid, action) {
   const v=vehicles.find(x=>x.id===vid); if(!v) return;
@@ -1731,7 +1843,7 @@ function openAssignMo(rid) {
   let html=`<div style="font-size:12px;color:var(--mut);margin-bottom:12px">Assigning to: <strong>${esc(r.city)} ${esc(r.routeNo)}</strong></div>`;
   if(free.length) {
     html+=free.map(v=>`<div onclick="doAssign('${v.id}','${rid}')" style="background:var(--sur2);border:1px solid var(--bdr);border-radius:8px;padding:10px 12px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;margin-bottom:7px">
-      <div><div style="font-family:var(--mono);font-weight:800;font-size:14px">${esc(v.number)}</div><div style="font-size:10px;color:var(--mut)">${esc(v.vendor&&v.vendor!=='—'?v.vendor:'—')} · ${esc(v.type)} · ${SL[v.status]}</div></div>
+      <div><div style="font-family:var(--mono);font-weight:800;font-size:14px">${esc(v.number)}${prechillBadge(v)}</div><div style="font-size:10px;color:var(--mut)">${esc(v.vendor&&v.vendor!=='—'?v.vendor:'—')} · ${esc(v.type)} · ${SL[v.status]}</div></div>
       <div style="font-size:18px;color:var(--acc)">→</div>
     </div>`).join('');
   } else { html+=`<div style="background:var(--sur2);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--mut);margin-bottom:12px">No free vehicles in pool — enter a new vehicle number below</div>`; }
@@ -2152,10 +2264,13 @@ function renderWHDash() {
   const now=nowMins();
   const total=routes.length;
   const notIn=routes.filter(r=>rSt(r)==='planned');
-  const pendD=vehicles.filter(v=>v.status==='inside'&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete);
-  const atD  =vehicles.filter(v=>v.status==='dock'&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete);
-  const loaded=vehicles.filter(v=>v.status==='loaded'&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete);
+  const pendD =vehicles.filter(v=>v.status==='inside'&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete);
+  const atD   =vehicles.filter(v=>v.status==='dock'&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete);
+  const loaded =vehicles.filter(v=>v.status==='loaded'&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete);
   const departed=vehicles.filter(v=>v.status==='out'&&!v.isUnplanned&&!v.masterIncomplete);
+  // Yesterday carry-overs visible to warehouse
+  const ydayPend=pendD.filter(v=>v.isCarryOver);
+  const ydayDock=atD.filter(v=>v.isCarryOver);
   const dAlerts=atD.filter(v=>dockMins(v)>=75);
   const docksAct=new Set(atD.map(v=>v.dock).filter(d=>d&&d!=='—')).size;
   const LL=loaded.filter(v=>vDT(v)!=='outstation').length;
@@ -2213,6 +2328,11 @@ function renderWHDash() {
         </div>
       </div>
     </div>
+    ${ydayPend.length||ydayDock.length?`
+    <div style="background:var(--ogd);border:1px solid var(--org);border-radius:var(--r);padding:9px 13px;margin-bottom:8px">
+      <div style="font-size:11px;font-weight:800;color:var(--org);margin-bottom:5px">📅 Yesterday's Carry-over Vehicles</div>
+      ${[...ydayPend,...ydayDock].map(v=>{const r=vR(v);return `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,165,0,.2);font-size:11px"><span style="font-family:var(--mono);font-weight:800">${esc(v.number)}</span><span style="color:var(--mut)">${esc(r?.city||'—')}</span><span style="color:${v.status==='dock'?'var(--pur)':'var(--blu)'}">${SL[v.status]}</span><span class="yday">YDAY</span></div>`;}).join('')}
+    </div>`:''}
     ${dAlerts.length?`<div class="sec" style="margin-bottom:8px">🚨 Dock Alerts</div>${dAlerts.map(v=>`<div class="al al-o">⚠️ <strong>${esc(v.number)}</strong> — ${dockMins(v)}m on dock</div>`).join('')}`:''}
     ${notIn.filter(r=>r.eta&&now>t2m(r.eta)).length?`<div class="sec" style="margin-bottom:8px">⏰ ETA Overdue</div>${notIn.filter(r=>r.eta&&now>t2m(r.eta)).map(r=>{const v=rV(r);return `<div class="al al-o">⏰ <strong>${esc(v?.number||r.city)}</strong> — ${now-t2m(r.eta)}m past ETA</div>`;}).join('')}`:''}
     ${types.length?`<div class="sec" style="margin-bottom:8px">⏱ Avg Loading Time</div>
@@ -2347,13 +2467,14 @@ function renderUpdate() {
           const existingAlert=getGateAlert(v.id);
           const alertPending=existingAlert&&!existingAlert.ack;
           const alertAcked=existingAlert&&existingAlert.ack;
+          const confirmedBy=existingAlert?.confirmedBy||'';
           html+=`<div style="background:var(--sur);border:1px solid var(--bdr);border-left:3px solid var(--blu);border-radius:var(--r);padding:11px 13px;margin-bottom:9px">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-              <div><div style="font-family:var(--mono);font-weight:800;font-size:15px">${esc(v.number)} ${dtag}${yd}</div>${r?`<div style="font-size:10px;color:var(--mut)">${esc(r.city)}${r.stores?.length?' · '+r.stores.length+' stores':''}</div>`:''}</div>
+              <div><div style="font-family:var(--mono);font-weight:800;font-size:15px">${esc(v.number)} ${dtag}${yd}${v.prechill?'<span style="background:#0D3A2E;border:1px solid #3FB950;color:#3FB950;border-radius:4px;padding:1px 5px;font-size:8px;font-weight:800;margin-left:4px">❄️ PRECHILL</span>':''}</div>${r?`<div style="font-size:10px;color:var(--mut)">${esc(r.city)}${r.stores?.length?' · '+r.stores.length+' stores':''}</div>`:''}</div>
               <div style="text-align:right">
                 <div style="font-size:10px;color:var(--mut)">In since ${v.times?.inside||'—'}</div>
                 <button onclick="sendGateAlert('${v.id}','${esc(v.number)}')" style="margin-top:4px;display:flex;align-items:center;gap:5px;background:${alertAcked?'var(--gnd)':alertPending?'var(--ogd)':'var(--sur2)'};border:1px solid ${alertAcked?'var(--grn)':alertPending?'var(--org)':'var(--bdr)'};color:${alertAcked?'var(--grn)':alertPending?'var(--org)':'var(--mut)'};border-radius:6px;padding:4px 9px;font-size:10px;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif">
-                  ${alertAcked?'<span style="width:8px;height:8px;border-radius:50%;background:var(--grn);display:inline-block"></span> Gate Confirmed':alertPending?'📢 Alerted':'📢 Alert Gate'}
+                  ${alertAcked?`<span style="width:8px;height:8px;border-radius:50%;background:var(--grn);display:inline-block"></span> ${confirmedBy} ✓`:alertPending?'📢 Alerted':'📢 Alert Gate'}
                 </button>
               </div>
             </div>
@@ -2568,13 +2689,16 @@ function sendGateAlert(vid, vnum) {
 }
 function doSendGateAlert(vid, vnum, dock) {
   const alerts=getGateAlerts();
-  // Add new alert — keep all unacknowledged alerts visible
   alerts.unshift({id:Date.now().toString(36),vid,vnum,dock,time:nowTime(),ts:Date.now(),ack:false,sentBy:'Warehouse',type:'dock'});
   saveGateAlerts(alerts.slice(0,50));
-  cMo(); toast('📢 Gate alerted — '+vnum+' → '+dock); renderUpdate();
+  // Push notification to Gate + Pilot
+  pushNotifToAll('gate','📢 Place on Dock — GNSC',`Place ${vnum} on Dock ${dock}`);
+  pushNotifToAll('pilot','📢 Place on Dock — GNSC',`Place ${vnum} on Dock ${dock}`);
+  cMo(); toast('📢 Gate & Pilot alerted — '+vnum+' → '+dock); renderUpdate();
 }
 function ackGateAlert(alertId) {
-  const alerts=getGateAlerts().map(a=>a.id===alertId||a.vid===alertId?{...a,ack:true,ackTime:nowTime()}:a);
+  const confirmedBy = currentRole==='pilot'?'Pilot':'Gate';
+  const alerts=getGateAlerts().map(a=>a.id===alertId||a.vid===alertId?{...a,ack:true,ackTime:nowTime(),confirmedBy}:a);
   saveGateAlerts(alerts);
   const banner=document.getElementById('gateBanner');
   if(banner) banner.style.display='none';
@@ -3088,8 +3212,10 @@ function renderPlan() {
       <div id="bPreview" style="display:none;margin-bottom:8px"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <button class="btn-s" style="margin-bottom:0" onclick="bulkPreview()">👁 Preview</button>
-        <button class="btn-p" id="bConfirm" style="display:none;margin-bottom:0" onclick="bulkUpload()">✅ Upload Today</button>
+        <button class="btn-p" id="bConfirm" style="display:none;margin-bottom:0" onclick="bulkUpload(false)">✅ Upload Today</button>
       </div>
+      <button class="btn-s" id="bAppend" style="display:none;margin-top:6px;width:100%;color:var(--blu);border-color:var(--blu)" onclick="bulkUpload(true)">➕ Append to Today's Plan</button>
+      <div id="bAppendNote" style="display:none;font-size:10px;color:var(--mut);margin-top:4px;text-align:center">Existing routes kept · only new routes added</div>
     </div>
 
     <!-- TOMORROW'S UPLOAD -->
@@ -3111,6 +3237,11 @@ function renderPlan() {
 
     <!-- TOMORROW QUEUED -->
     ${tmrwHtml}
+    ${tomorrowPlan.length?`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <button onclick="activateTomorrowNow()" style="padding:12px;background:var(--acc);color:#000;border:none;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif">⚡ Activate Now</button>
+      <button onclick="clearTomorrowPlan()" style="padding:12px;background:var(--rdd);color:var(--red);border:1px solid var(--red);border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">🗑 Clear Queue</button>
+    </div>`:''}
 
     <!-- TODAY'S PLAN -->
     ${uploadedHtml||'<div class="empty"><div class="empty-ic">📋</div><div class="empty-t">No plan uploaded yet<br>Paste Excel data above</div></div>'}
@@ -3118,8 +3249,140 @@ function renderPlan() {
 }
 
 // ─────────────────────────────────────────────
-// BULK UPLOAD
+// PRECHILL TAB (Warehouse)
 // ─────────────────────────────────────────────
+function renderPrechill() {
+  const el=document.getElementById('pg-prechill'); if(!el||!el.classList.contains('on')) return;
+  const inside=vehicles.filter(v=>v.status==='inside'&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete);
+  const alerts=getGateAlerts().filter(a=>a.type==='prechill');
+
+  const listHtml=inside.length?inside.map(v=>{
+    const r=vR(v);
+    const pAlert=alerts.find(a=>a.vid===v.id&&!a.ack);
+    const doneAlert=alerts.find(a=>a.vid===v.id&&a.ack);
+    let statusBadge='';
+    if(v.prechill&&v.prechillConfirmed) statusBadge=`<span style="background:#0D3A2E;border:1px solid var(--grn);color:var(--grn);border-radius:4px;padding:2px 6px;font-size:9px;font-weight:800">❄️ PRECHILLED ✓${doneAlert?.confirmedBy?' by '+doneAlert.confirmedBy:''}</span>`;
+    else if(v.prechill) statusBadge=`<span style="background:#0D1F33;border:1px solid var(--blu);color:var(--blu);border-radius:4px;padding:2px 6px;font-size:9px;font-weight:800;animation:pulse 1.8s infinite">❄️ PRECHILL PENDING...</span>`;
+    return `<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:11px 13px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div>
+          <div style="font-family:var(--mono);font-weight:800;font-size:15px">${esc(v.number)}</div>
+          <div style="font-size:10px;color:var(--mut)">${esc(v.vendor!=='—'?v.vendor:'—')}${r?' · '+esc(r.city):''}</div>
+          <div style="font-size:10px;color:var(--dim)">In since ${v.times?.inside||'—'}</div>
+        </div>
+        <div style="text-align:right;display:flex;flex-direction:column;gap:5px;align-items:flex-end">
+          ${statusBadge}
+          ${!v.prechill?`<button onclick="requestPrechill('${v.id}','${esc(v.number)}')" style="background:var(--bld);border:1px solid var(--blu);color:var(--blu);border-radius:7px;padding:7px 12px;font-size:11px;font-weight:800;cursor:pointer">❄️ Request Prechill</button>`:''}
+        </div>
+      </div>
+    </div>`;
+  }).join(''):`<div class="empty"><div class="empty-ic">❄️</div><div class="empty-t">No vehicles inside GNSC</div></div>`;
+
+  el.innerHTML=`<div class="pg-h"><div><div class="pg-t">❄️ Prechill</div><div class="pg-s">${inside.length} vehicles inside · ${inside.filter(v=>v.prechill&&v.prechillConfirmed).length} prechilled</div></div><div class="pg-time">${nowTime()}</div></div>${listHtml}<div style="height:16px"></div>`;
+}
+
+function requestPrechill(vid, vnum) {
+  const v=vehicles.find(x=>x.id===vid); if(!v) return;
+  if(!confirm(`Request prechill for ${vnum}?\nAlert will be sent to Gate and Pilot team.`)) return;
+  v.prechill=true;
+  v.prechillConfirmed=false;
+  // Add prechill alert
+  const alerts=getGateAlerts();
+  alerts.unshift({id:Date.now().toString(36),vid,vnum,dock:'—',time:nowTime(),ts:Date.now(),ack:false,sentBy:'Warehouse',type:'prechill',msg:'Prechill vehicle before dock'});
+  saveGateAlerts(alerts.slice(0,50));
+  // Push to Gate + Pilot
+  pushNotifToAll('gate','❄️ Prechill Request — GNSC',`Prechill ${vnum} before dock placement`);
+  pushNotifToAll('pilot','❄️ Prechill Request — GNSC',`Prechill ${vnum} before dock placement`);
+  save(); renderAll();
+  toast('❄️ Prechill requested — Gate & Pilot alerted');
+}
+
+// Override ackGateAlert to handle prechill confirmation
+const _origAck=ackGateAlert;
+function ackGateAlert(alertId) {
+  const confirmedBy=currentRole==='pilot'?'Pilot':'Gate';
+  const alerts=getGateAlerts().map(a=>{
+    if(a.id===alertId||a.vid===alertId) {
+      // If prechill alert, mark vehicle as prechilled
+      if(a.type==='prechill') {
+        const v=vehicles.find(x=>x.id===a.vid);
+        if(v) { v.prechillConfirmed=true; save(); }
+      }
+      return {...a,ack:true,ackTime:nowTime(),confirmedBy};
+    }
+    return a;
+  });
+  saveGateAlerts(alerts);
+  const banner=document.getElementById('gateBanner');
+  if(banner) { renderAll(); }
+}
+
+// ─────────────────────────────────────────────
+// PILOT TAB
+// ─────────────────────────────────────────────
+function renderPilot() {
+  const el=document.getElementById('pg-pilot'); if(!el||!el.classList.contains('on')) return;
+  const insideV=vehicles.filter(v=>['inside','dock','loaded'].includes(v.status));
+  const alerts=getGateAlerts().filter(a=>!a.ack);
+
+  // Alert banner
+  let alertHtml='';
+  if(alerts.length) {
+    alertHtml=`<div style="background:var(--acc);border-radius:var(--r);padding:10px 14px;margin-bottom:10px;display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:11px;font-weight:800;color:#000;margin-bottom:4px">📢 ${alerts.length} Pending Action${alerts.length>1?'s':''}</div>
+      ${alerts.map(a=>`
+        <div style="display:flex;align-items:center;gap:8px;background:rgba(0,0,0,.12);border-radius:8px;padding:8px 10px">
+          <div style="flex:1">
+            <div style="font-size:11px;font-weight:800;color:#000">${a.type==='prechill'?'❄️ Prechill':a.type==='loaded'?'📦 Clear Dock':'📢 Place on Dock'}</div>
+            <div style="font-size:13px;font-weight:800;color:#000;font-family:monospace">${esc(a.vnum)}${a.dock&&a.dock!=='—'?' → '+esc(a.dock):''}</div>
+            <div style="font-size:9px;color:rgba(0,0,0,.6)">${a.time}</div>
+          </div>
+          <button onclick="ackGateAlert('${a.id||a.vid}')" style="background:#000;color:var(--acc);border:none;border-radius:8px;padding:10px 14px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap">✓ Done</button>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  // Vehicle list
+  const stColors={inside:'var(--blu)',dock:'var(--pur)',loaded:'var(--grn)'};
+  const stLabels={inside:'In Yard',dock:'At Dock',loaded:'Loaded'};
+  const vHtml=insideV.length?insideV.map(v=>{
+    const r=vR(v);
+    return `<div style="background:var(--sur);border:1px solid var(--bdr);border-left:3px solid ${stColors[v.status]||'var(--bdr)'};border-radius:var(--r);padding:10px 13px;margin-bottom:7px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-family:var(--mono);font-weight:800;font-size:14px">${esc(v.number)}
+            ${v.prechill&&!v.prechillConfirmed?'<span style="background:#0D1F33;border:1px solid var(--blu);color:var(--blu);border-radius:3px;padding:1px 4px;font-size:8px;margin-left:4px">❄️ PRECHILL</span>':(v.prechill&&v.prechillConfirmed?'<span style="background:#0D3A2E;border:1px solid var(--grn);color:var(--grn);border-radius:3px;padding:1px 4px;font-size:8px;margin-left:4px">❄️ DONE</span>':'')}
+          </div>
+          <div style="font-size:10px;color:var(--mut)">${esc(v.vendor!=='—'?v.vendor:'—')}${r?' · '+esc(r.city):''}</div>
+          ${v.dock&&v.dock!=='—'?`<div style="font-size:10px;color:var(--pur);font-weight:700">🔋 ${esc(v.dock)}</div>`:''}
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;font-weight:800;color:${stColors[v.status]}">${stLabels[v.status]||esc(v.status)}</div>
+          <div style="font-size:9px;color:var(--dim)">${v.times?.[v.status]||'—'}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join(''):`<div class="empty"><div class="empty-ic">🚗</div><div class="empty-t">No vehicles inside GNSC</div></div>`;
+
+  el.innerHTML=`<div class="pg-h"><div><div class="pg-t">🚗 Pilot View</div><div class="pg-s">${insideV.length} vehicles · ${alerts.length} pending alerts</div></div><div class="pg-time">${nowTime()}</div></div>
+    ${alertHtml}
+    <div class="sec" style="margin-bottom:8px">🏭 Vehicles in GNSC</div>
+    ${vHtml}
+    <div style="height:16px"></div>`;
+}
+
+// Also show pilot alerts in checkGateAlerts
+const _origCheckGate=checkGateAlerts;
+function checkGateAlerts() {
+  if(currentRole==='pilot') { renderPilot(); return; }
+  _origCheckGate();
+}
+function prechillBadge(v) {
+  if(!v?.prechill) return '';
+  if(!['transport','warehouse','pilot'].includes(currentRole)) return '';
+  if(v.prechillConfirmed) return '<span style="background:#0D3A2E;border:1px solid var(--grn);color:var(--grn);border-radius:3px;padding:1px 4px;font-size:8px;font-weight:800;margin-left:3px">❄️ PRECHILLED</span>';
+  return '<span style="background:#0D1F33;border:1px solid var(--blu);color:var(--blu);border-radius:3px;padding:1px 4px;font-size:8px;font-weight:800;margin-left:3px">❄️ PRECHILL</span>';
+}
 function parseBulk(text) {
   const map={};
   text.trim().split('\n').filter(l=>l.trim()).forEach(line=>{
@@ -3216,8 +3479,16 @@ function bulkPreview() {
   window._bulkParsed=parsed;
   window._bulkMasterIssues=masterIssues;
   window._bulkNeedEta=needEta;
-  // Always allow upload — store issues result in unknown city/dest type
+  // Always allow upload
   if(true) document.getElementById('bConfirm').style.display='block';
+  // Show Append option if today already has routes
+  const todayHasRoutes=routes.filter(r=>!r.isCarryOver).length>0;
+  const appendBtn=document.getElementById('bAppend');
+  const appendNote=document.getElementById('bAppendNote');
+  if(appendBtn) appendBtn.style.display=todayHasRoutes?'block':'none';
+  if(appendNote) appendNote.style.display=todayHasRoutes?'block':'none';
+  const confirmBtn=document.getElementById('bConfirm');
+  if(confirmBtn) confirmBtn.textContent=todayHasRoutes?'🔄 Replace Today\'s Plan':'✅ Upload Today';
   const hasWarnings=masterIssues.length||storeIssues.length;
   toast(hasWarnings?`⚠️ ${[masterIssues.length?masterIssues.length+' vehicles not in master':'',storeIssues.length?storeIssues.length+' stores not in master':''].filter(Boolean).join(' · ')} — uploading anyway`:parsed.length+' routes ready');
 }
@@ -3285,6 +3556,55 @@ function tomorrowUpload() {
   toast('✅ '+parsed.length+' routes queued for tomorrow midnight');
   renderPlan();
 }
+function activateTomorrowNow() {
+  if(!tomorrowPlan.length){ toast('⚠️ No plan queued','err'); return; }
+  if(!confirm('Activate tomorrow\'s plan now?\n\nRoutes will be stamped with tomorrow\'s date. Midnight will not reset anything.\n\nProceed?')) return;
+
+  // Use tomorrow's date so midnight guard recognises this as "today's" data
+  const tmrwDate=new Date(); tmrwDate.setDate(tmrwDate.getDate()+1);
+  const nextDate=tmrwDate.toISOString().slice(0,10);
+
+  const existingVNums=new Set(vehicles.filter(v=>['inside','dock','loaded'].includes(v.status)).map(v=>v.number));
+  let ra=0, va=0, skipped=[];
+
+  tomorrowPlan.forEach(p=>{
+    if(routes.find(r=>r.routeNo===p.routeNo&&!r.isCarryOver)){ return; }
+    const rId=genRId();
+    const route={id:rId,routeNo:p.routeNo,city:p.city,stores:p.stores,destType:p.destType,eta:p.eta,notes:'',vehicleId:null,status:'short',date:nextDate};
+    routes.push(route); ra++;
+    if(p.vehicleNo) {
+      const m=masterLookup(p.vehicleNo);
+      if(!m||m.incomplete||m.vendor==='—') { skipped.push(p.vehicleNo); return; }
+      const poolV=vehicles.find(v=>v.number===p.vehicleNo&&['inside','dock','loaded'].includes(v.status)&&!v.routeId);
+      if(poolV) {
+        poolV.routeId=rId; route.vehicleId=poolV.id; route.status=poolV.status; va++;
+      } else if(!existingVNums.has(p.vehicleNo)) {
+        const vId=genId();
+        const veh={id:vId,number:p.vehicleNo,type:m?.type||'24ft',vendor:m?.vendor||'—',dock:'—',routeId:rId,status:'planned',times:{planned:nowTime()},date:nextDate,eta:p.eta||'17:00'};
+        vehicles.push(veh); route.vehicleId=vId; route.status='planned'; va++;
+      } else {
+        skipped.push(p.vehicleNo);
+      }
+    }
+  });
+
+  // Mark old-date vehicles/routes as carry-over immediately
+  // so YDAY flags show right away without waiting for midnight
+  markCarryOvers(nextDate);
+
+  // Push nextDate to Firebase lastday so all devices know day is handled
+  if(typeof db!=='undefined') db.ref('gnsc/daily/lastday').set(nextDate).catch(e=>console.warn(e));
+  localStorage.setItem('gnsc_lastday', nextDate);
+
+  // Clear tomorrow queue
+  tomorrowPlan=[];
+  localStorage.setItem('gnsc_tomorrow',JSON.stringify(tomorrowPlan));
+  saveMasters(); save(); syncDaily();
+  log('TRANSPORT',`⚡ Tomorrow's plan activated early — ${ra} routes, ${va} vehicles`,'var(--acc)');
+  toast(`⚡ Plan activated — ${ra} routes · ${va} vehicles · midnight will not reset`);
+  if(skipped.length) setTimeout(()=>alert('⚠️ '+skipped.length+' vehicles skipped (not in master or busy):\n'+skipped.join(', ')),300);
+  renderAll();
+}
 function clearTomorrowPlan() {
   if(!confirm('Clear tomorrow\'s queued plan?')) return;
   tomorrowPlan=[];
@@ -3314,7 +3634,7 @@ function bulkSaveAllToMaster() {
   toast('✅ All vehicles saved to master — upload ready');
   bulkPreview();
 }
-function bulkUpload() {
+function bulkUpload(append=false) {
   const parsed=window._bulkParsed||[];
   if(!parsed.length){ toast('⚠️ Preview first','err'); return; }
 
@@ -3331,6 +3651,16 @@ function bulkUpload() {
     if(missingEta.length) toast('⚠️ ETA defaulted to 17:00 for '+missingEta.length+' vehicle(s) — update from Vehicles tab');
   }
   let ra=0, va=0, sk=0, conflicts=[];
+
+  if(!append) {
+    // Replace mode — clear today's routes and unassigned vehicles first
+    const todayVids=new Set(routes.filter(r=>!r.isCarryOver).map(r=>r.vehicleId).filter(Boolean));
+    routes=routes.filter(r=>r.isCarryOver);
+    vehicles=vehicles.filter(v=>v.isCarryOver||v.isUnplanned||!todayVids.has(v.id));
+    toast('🔄 Replacing today\'s plan...');
+  } else {
+    toast('➕ Appending to today\'s plan...');
+  }
 
   parsed.forEach(p=>{
     if(routes.find(r=>r.routeNo===p.routeNo&&!r.isCarryOver)){ sk++; return; }
