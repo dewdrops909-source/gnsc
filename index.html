@@ -3285,10 +3285,11 @@ function renderPlan() {
       <div id="bPreview" style="display:none;margin-bottom:8px"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <button class="btn-s" style="margin-bottom:0" onclick="bulkPreview()">👁 Preview</button>
-        <button class="btn-p" id="bConfirm" style="display:none;margin-bottom:0" onclick="bulkUpload(false)">✅ Upload Today</button>
+        <button class="btn-p" id="bConfirm" style="display:none;margin-bottom:0" onclick="bulkUpload(false)">${todayRoutes.length?'🔄 Replace Plan':'✅ Upload Today'}</button>
       </div>
-      <button class="btn-s" id="bAppend" style="display:none;margin-top:6px;width:100%;color:var(--blu);border-color:var(--blu)" onclick="bulkUpload(true)">➕ Append to Today's Plan</button>
-      <div id="bAppendNote" style="display:none;font-size:10px;color:var(--mut);margin-top:4px;text-align:center">Existing routes kept · only new routes added</div>
+      ${todayRoutes.length?`
+      <button class="btn-s" style="margin-top:6px;width:100%;color:var(--blu);border-color:var(--blu)" onclick="bulkUpload(true)">➕ Append to Today's Plan</button>
+      <div style="font-size:10px;color:var(--mut);margin-top:4px;text-align:center">Existing routes kept · only new routes added</div>`:''}
     </div>
 
     <!-- TOMORROW'S UPLOAD -->
@@ -3550,16 +3551,9 @@ function bulkPreview() {
   window._bulkParsed=parsed;
   window._bulkMasterIssues=masterIssues;
   window._bulkNeedEta=needEta;
-  // Always allow upload
-  if(true) document.getElementById('bConfirm').style.display='block';
-  // Show Append option if today already has routes
-  const todayHasRoutes=routes.filter(r=>!r.isCarryOver).length>0;
-  const appendBtn=document.getElementById('bAppend');
-  const appendNote=document.getElementById('bAppendNote');
-  if(appendBtn) appendBtn.style.display=todayHasRoutes?'block':'none';
-  if(appendNote) appendNote.style.display=todayHasRoutes?'block':'none';
+  // Show Upload button after preview
   const confirmBtn=document.getElementById('bConfirm');
-  if(confirmBtn) confirmBtn.textContent=todayHasRoutes?'🔄 Replace Today\'s Plan':'✅ Upload Today';
+  if(confirmBtn) { confirmBtn.style.display='block'; }
   const hasWarnings=masterIssues.length||storeIssues.length;
   toast(hasWarnings?`⚠️ ${[masterIssues.length?masterIssues.length+' vehicles not in master':'',storeIssues.length?storeIssues.length+' stores not in master':''].filter(Boolean).join(' · ')} — uploading anyway`:parsed.length+' routes ready');
 }
