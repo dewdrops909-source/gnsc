@@ -458,7 +458,9 @@ let vehicles       = JSON.parse(localStorage.getItem('gnsc_vehicles')  || '[]');
 let actLog         = JSON.parse(localStorage.getItem('gnsc_actlog')    || '[]');
 let loadHist       = JSON.parse(localStorage.getItem('gnsc_loadhist')  || '[]');
 let dayHist        = JSON.parse(localStorage.getItem('gnsc_dayhist')   || '[]'); // [{date,vehicles,vendors:{},breakdowns:[],delayed:[],indentPlan,indentActual}]
-let DOCKS          = JSON.parse(localStorage.getItem('gnsc_docks')     || 'null') || ['D05','D06','D07','D08','D09','D10','D11'];
+const DEFAULT_DOCKS = ['D05','D06','D07','D08','D09','D10','D11'];
+let DOCKS = JSON.parse(localStorage.getItem('gnsc_docks') || 'null') || [...DEFAULT_DOCKS];
+localStorage.setItem('gnsc_docks', JSON.stringify(DOCKS));
 let masterVehicles = JSON.parse(localStorage.getItem('gnsc_master')    || '[]');
 let masterStores   = JSON.parse(localStorage.getItem('gnsc_mstores')   || '[]');
 let masterTrans    = JSON.parse(localStorage.getItem('gnsc_mtrans')    || '[]');
@@ -630,8 +632,9 @@ function saveMasters() {
   localStorage.setItem('gnsc_mtrans',   JSON.stringify(masterTrans));
   localStorage.setItem('gnsc_mtypes',   JSON.stringify(masterTypes));
   localStorage.setItem('gnsc_indent',   JSON.stringify(masterIndent));
+  localStorage.setItem('gnsc_docks',    JSON.stringify(DOCKS));
   if(typeof db!=='undefined') {
-    db.ref('gnsc/masters').set(sanitize({vehicles:masterVehicles,stores:masterStores,trans:masterTrans,types:masterTypes,indent:masterIndent}))
+    db.ref('gnsc/masters').set(sanitize({vehicles:masterVehicles,stores:masterStores,trans:masterTrans,types:masterTypes,indent:masterIndent,docks:DOCKS}))
       .catch(e=>console.warn('FB masters:',e));
   }
 }
@@ -646,6 +649,11 @@ function startFirebaseSync() {
     return;
   }
   _fbListening=true;
+  // Push corrected docks to Firebase if they were old defaults
+  if(DOCKS[0]==='D05' && (!localStorage.getItem('gnsc_docks_synced'))) {
+    db.ref('gnsc/daily/docks').set(DOCKS).catch(e=>console.warn(e));
+    localStorage.setItem('gnsc_docks_synced','1');
+  }
   // Live data listener
   db.ref('gnsc/live').on('value',snap=>{
     if(_ignoreNext){_ignoreNext=false;return;}
@@ -677,6 +685,7 @@ function startFirebaseSync() {
     if(d.trans)    masterTrans   =d.trans;
     if(d.types)    masterTypes   =d.types;
     if(d.indent)   masterIndent  =d.indent;
+    if(d.docks)  { DOCKS=d.docks; localStorage.setItem('gnsc_docks',JSON.stringify(DOCKS)); }
     localStorage.setItem('gnsc_master',  JSON.stringify(masterVehicles));
     localStorage.setItem('gnsc_mstores', JSON.stringify(masterStores));
     localStorage.setItem('gnsc_mtrans',  JSON.stringify(masterTrans));
@@ -698,7 +707,7 @@ function startFirebaseSync() {
     }
     if(d.indentDate)  localStorage.setItem('gnsc_indent_date',d.indentDate);
     if(d.tomorrowPlan){ tomorrowPlan=d.tomorrowPlan; localStorage.setItem('gnsc_tomorrow',JSON.stringify(tomorrowPlan)); }
-    if(d.docks){ DOCKS=d.docks; localStorage.setItem('gnsc_docks',JSON.stringify(DOCKS)); }
+    // Note: docks always use hardcoded DEFAULT_DOCKS, not Firebase
     // Always re-render so indent shows on all devices
     if(currentRole) renderAll();
   });
@@ -3519,7 +3528,8 @@ function syncDaily() {
   if(typeof db==='undefined') return;
   db.ref('gnsc/daily').update(sanitize({
     actualIndent, indentDate:localStorage.getItem('gnsc_indent_date')||TODAY,
-    tomorrowPlan:tomorrowPlan||[], docks:DOCKS||[]
+    tomorrowPlan:tomorrowPlan||[]
+    // docks not synced — always hardcoded to DEFAULT_DOCKS
   })).catch(e=>console.warn('FB daily sync:',e));
 }
 function tomorrowUpload() {
@@ -4145,6 +4155,12 @@ document.addEventListener('visibilitychange',()=>{
 
 document.addEventListener('DOMContentLoaded', ()=>{
   startFirebaseSync();
+  // Push default docks if not already in Firebase
+  if(typeof db!=='undefined') {
+    db.ref('gnsc/masters/docks').once('value').then(snap=>{
+      if(!snap.val()) db.ref('gnsc/masters/docks').set(DEFAULT_DOCKS).catch(e=>console.warn(e));
+    }).catch(()=>{});
+  }
   // Auto-login if session exists
   if(currentUser) launchApp();
 });
