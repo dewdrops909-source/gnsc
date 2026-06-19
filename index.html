@@ -725,6 +725,7 @@ function startFirebaseSync() {
     const alerts=snap.val()||[];
     localStorage.setItem(ALERT_KEY,JSON.stringify(alerts));
     if(currentRole==='gate') checkGateAlerts();
+    if(currentRole==='pilot') checkPilotAlerts();
   });
   console.log('%c🔥 Firebase sync active','color:#F4A228;font-weight:bold');
 }
@@ -2719,8 +2720,10 @@ function ackGateAlert(alertId) {
 // Gate alert polling — runs every 4 seconds for gate role
 let _alertPollInterval=null;
 function startAlertPoll() {
-  if(_alertPollInterval) return;
-  _alertPollInterval=setInterval(checkGateAlerts, 4000);
+  if(_alertPollInterval) clearInterval(_alertPollInterval);
+  const fn=currentRole==='pilot'?checkPilotAlerts:checkGateAlerts;
+  _alertPollInterval=setInterval(fn, 4000);
+  fn();
 }
 function stopAlertPoll() {
   if(_alertPollInterval){ clearInterval(_alertPollInterval); _alertPollInterval=null; }
@@ -2750,25 +2753,93 @@ function checkGateAlerts() {
   // Send push notification for background alerts to all gate devices
   alerts.forEach(a=>{
     pushNotifToAll('gate',
-      a.type==='loaded'?'📦 Clear Dock — GNSC':'📢 Dock Alert — GNSC',
-      a.type==='loaded'?`Remove ${a.vnum} from Dock ${a.dock}`:`Place ${a.vnum} on Dock ${a.dock}`
+      a.type==='loaded'?'📦 Clear Dock — GNSC':a.type==='prechill'?'❄️ Prechill — GNSC':'📢 Dock Alert — GNSC',
+      a.type==='loaded'?`Remove ${a.vnum} from Dock ${a.dock}`:a.type==='prechill'?`Prechill ${a.vnum}`:`Place ${a.vnum} on Dock ${a.dock}`
     );
   });
-  playAlertSound();
+  startAlertRepeat(alerts); // repeating beep + vibration + wake lock + title flash
 }
+// ─────────────────────────────────────────────
+// ENHANCED ALERT SYSTEM (for Gate + Pilot)
+// ─────────────────────────────────────────────
+let _alertRepeatInterval=null;
+let _wakeLock=null;
+
+async function requestWakeLock() {
+  try {
+    if('wakeLock' in navigator) {
+      _wakeLock=await navigator.wakeLock.request('screen');
+    }
+  } catch(e){}
+}
+function releaseWakeLock() {
+  if(_wakeLock) { _wakeLock.release().catch(()=>{}); _wakeLock=null; }
+}
+
 function playAlertSound() {
   try {
     const ctx=new (window.AudioContext||window.webkitAudioContext)();
-    [0,150,300].forEach(delay=>{
+    // Long urgent beep pattern — 3 beeps, each 0.4s
+    [0,500,1000].forEach(delay=>{
       const osc=ctx.createOscillator(), gain=ctx.createGain();
       osc.connect(gain); gain.connect(ctx.destination);
-      osc.frequency.value=880; osc.type='sine';
-      gain.gain.setValueAtTime(0.3,ctx.currentTime+delay/1000);
-      gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+delay/1000+0.2);
-      osc.start(ctx.currentTime+delay/1000); osc.stop(ctx.currentTime+delay/1000+0.2);
+      osc.frequency.value=960; osc.type='square';
+      gain.gain.setValueAtTime(0,ctx.currentTime+delay/1000);
+      gain.gain.linearRampToValueAtTime(0.4,ctx.currentTime+delay/1000+0.05);
+      gain.gain.setValueAtTime(0.4,ctx.currentTime+delay/1000+0.35);
+      gain.gain.linearRampToValueAtTime(0,ctx.currentTime+delay/1000+0.4);
+      osc.start(ctx.currentTime+delay/1000);
+      osc.stop(ctx.currentTime+delay/1000+0.4);
     });
   } catch(e){}
 }
+
+function startAlertRepeat(alerts) {
+  stopAlertRepeat();
+  if(!alerts.length) return;
+  // Vibrate
+  if(navigator.vibrate) navigator.vibrate([300,100,300,100,600]);
+  // Wake lock — keep screen on
+  requestWakeLock();
+  // Flash page title
+  let titleFlip=false;
+  const origTitle=document.title;
+  const titleInterval=setInterval(()=>{
+    document.title=titleFlip?origTitle:'🚨 ALERT — GNSC';
+    titleFlip=!titleFlip;
+  },800);
+  // Flash banner background
+  const banner=document.getElementById('gateBanner');
+  if(banner) {
+    banner.style.animation='none';
+    banner.style.transition='background 0.3s';
+    let flashCount=0;
+    const flashInt=setInterval(()=>{
+      if(flashCount>6||!document.getElementById('gateBanner')){ clearInterval(flashInt); return; }
+      banner.style.background=flashCount%2===0?'#FF0000':'var(--acc)';
+      flashCount++;
+    },300);
+  }
+  // Repeat sound every 20 seconds until acknowledged
+  _alertRepeatInterval=setInterval(()=>{
+    const pending=getGateAlerts().filter(a=>!a.ack);
+    if(!pending.length) { stopAlertRepeat(); clearInterval(titleInterval); document.title=origTitle; return; }
+    playAlertSound();
+    if(navigator.vibrate) navigator.vibrate([200,100,200]);
+  },20000);
+  // Store titleInterval for cleanup
+  window._titleInterval=titleInterval;
+  window._origTitle=origTitle;
+}
+
+function stopAlertRepeat() {
+  if(_alertRepeatInterval) { clearInterval(_alertRepeatInterval); _alertRepeatInterval=null; }
+  if(window._titleInterval) { clearInterval(window._titleInterval); window._titleInterval=null; }
+  if(window._origTitle) { document.title=window._origTitle; window._origTitle=null; }
+  releaseWakeLock();
+}
+
+function playAlertSoundOnce() { playAlertSound(); }
 
 // ─────────────────────────────────────────────
 // GATE
@@ -3309,13 +3380,10 @@ function requestPrechill(vid, vnum) {
   toast('❄️ Prechill requested — Gate & Pilot alerted');
 }
 
-// Override ackGateAlert to handle prechill confirmation
-const _origAck=ackGateAlert;
 function ackGateAlert(alertId) {
   const confirmedBy=currentRole==='pilot'?'Pilot':'Gate';
   const alerts=getGateAlerts().map(a=>{
     if(a.id===alertId||a.vid===alertId) {
-      // If prechill alert, mark vehicle as prechilled
       if(a.type==='prechill') {
         const v=vehicles.find(x=>x.id===a.vid);
         if(v) { v.prechillConfirmed=true; save(); }
@@ -3325,6 +3393,9 @@ function ackGateAlert(alertId) {
     return a;
   });
   saveGateAlerts(alerts);
+  // Stop repeating alert if no more pending
+  const stillPending=alerts.filter(a=>!a.ack);
+  if(!stillPending.length) stopAlertRepeat();
   const banner=document.getElementById('gateBanner');
   if(banner) { renderAll(); }
 }
@@ -3383,11 +3454,9 @@ function renderPilot() {
     <div style="height:16px"></div>`;
 }
 
-// Also show pilot alerts in checkGateAlerts
-const _origCheckGate=checkGateAlerts;
-function checkGateAlerts() {
-  if(currentRole==='pilot') { renderPilot(); return; }
-  _origCheckGate();
+// Also refresh pilot view when alerts arrive
+function checkPilotAlerts() {
+  if(currentRole==='pilot') renderPilot();
 }
 function prechillBadge(v) {
   if(!v?.prechill) return '';
