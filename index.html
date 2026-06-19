@@ -422,6 +422,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--txt);min-he
   <div id="pg-details"    class="page"></div>
   <div id="pg-pilot"       class="page"></div>
   <div id="pg-prechill"    class="page"></div>
+  <div id="pg-plan"        class="page"></div>
   <div id="pg-update"    class="page"></div>
   <div id="pg-add"       class="page"></div>
   <div id="pg-masters"   class="page"></div>
@@ -649,11 +650,6 @@ function startFirebaseSync() {
     return;
   }
   _fbListening=true;
-  // Push corrected docks to Firebase if they were old defaults
-  if(DOCKS[0]==='D05' && (!localStorage.getItem('gnsc_docks_synced'))) {
-    db.ref('gnsc/daily/docks').set(DOCKS).catch(e=>console.warn(e));
-    localStorage.setItem('gnsc_docks_synced','1');
-  }
   // Live data listener
   db.ref('gnsc/live').on('value',snap=>{
     if(_ignoreNext){_ignoreNext=false;return;}
@@ -1246,6 +1242,7 @@ function renderPage(tab) {
   else if(tab==='details')  renderDetails();
   else if(tab==='pilot')    renderPilot();
   else if(tab==='prechill') renderPrechill();
+  else if(tab==='plan')     renderPlan();
   else if(tab==='update')  renderUpdate();
   else if(tab==='add')     renderAdd();
   else if(tab==='masters') renderMasters();
@@ -2708,13 +2705,6 @@ function doSendGateAlert(vid, vnum, dock) {
   pushNotifToAll('gate','📢 Place on Dock — GNSC',`Place ${vnum} on Dock ${dock}`);
   pushNotifToAll('pilot','📢 Place on Dock — GNSC',`Place ${vnum} on Dock ${dock}`);
   cMo(); toast('📢 Gate & Pilot alerted — '+vnum+' → '+dock); renderUpdate();
-}
-function ackGateAlert(alertId) {
-  const confirmedBy = currentRole==='pilot'?'Pilot':'Gate';
-  const alerts=getGateAlerts().map(a=>a.id===alertId||a.vid===alertId?{...a,ack:true,ackTime:nowTime(),confirmedBy}:a);
-  saveGateAlerts(alerts);
-  const banner=document.getElementById('gateBanner');
-  if(banner) banner.style.display='none';
 }
 
 // Gate alert polling — runs every 4 seconds for gate role
@@ -4227,7 +4217,7 @@ document.addEventListener('visibilitychange',()=>{
 
 document.addEventListener('DOMContentLoaded', ()=>{
   startFirebaseSync();
-  // Always push correct docks to Firebase on load
+  // Push correct docks to Firebase masters on startup
   if(typeof db!=='undefined') {
     db.ref('gnsc/masters/docks').set(DEFAULT_DOCKS).catch(e=>console.warn(e));
   }
