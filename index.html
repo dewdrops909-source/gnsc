@@ -685,7 +685,10 @@ function startFirebaseSync() {
     if(d.trans)    masterTrans   =d.trans;
     if(d.types)    masterTypes   =d.types;
     if(d.indent)   masterIndent  =d.indent;
-    if(d.docks)  { DOCKS=d.docks; localStorage.setItem('gnsc_docks',JSON.stringify(DOCKS)); }
+    // Docks: only update if explicitly uploaded (length check) — never restore old D1-D8
+    if(d.docks && Array.isArray(d.docks) && !d.docks.includes('D1') && !d.docks.includes('D2')) {
+      DOCKS=d.docks; localStorage.setItem('gnsc_docks',JSON.stringify(DOCKS));
+    }
     localStorage.setItem('gnsc_master',  JSON.stringify(masterVehicles));
     localStorage.setItem('gnsc_mstores', JSON.stringify(masterStores));
     localStorage.setItem('gnsc_mtrans',  JSON.stringify(masterTrans));
@@ -4155,11 +4158,9 @@ document.addEventListener('visibilitychange',()=>{
 
 document.addEventListener('DOMContentLoaded', ()=>{
   startFirebaseSync();
-  // Push default docks if not already in Firebase
+  // Always push correct docks to Firebase on load
   if(typeof db!=='undefined') {
-    db.ref('gnsc/masters/docks').once('value').then(snap=>{
-      if(!snap.val()) db.ref('gnsc/masters/docks').set(DEFAULT_DOCKS).catch(e=>console.warn(e));
-    }).catch(()=>{});
+    db.ref('gnsc/masters/docks').set(DEFAULT_DOCKS).catch(e=>console.warn(e));
   }
   // Auto-login if session exists
   if(currentUser) launchApp();
