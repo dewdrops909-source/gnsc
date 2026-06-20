@@ -673,23 +673,18 @@ function startFirebaseSync() {
     localStorage.setItem('gnsc_dayhist',  JSON.stringify(dayHist));
     if(currentRole){renderAll();updateCutBan();}
   });
-  // Masters listener
+  // Masters listener — always overwrite local with Firebase (Firebase is source of truth)
   db.ref('gnsc/masters').on('value',snap=>{
     const d=snap.val(); if(!d) return;
-    if(d.vehicles) masterVehicles=d.vehicles;
-    if(d.stores)   masterStores  =d.stores;
-    if(d.trans)    masterTrans   =d.trans;
-    if(d.types)    masterTypes   =d.types;
-    if(d.indent)   masterIndent  =d.indent;
-    // Docks: only update if explicitly uploaded (length check) — never restore old D1-D8
+    // Always update all masters from Firebase — ensures all devices stay in sync
+    if(d.vehicles !== undefined) { masterVehicles=d.vehicles||[]; localStorage.setItem('gnsc_master', JSON.stringify(masterVehicles)); }
+    if(d.stores   !== undefined) { masterStores  =d.stores||[];   localStorage.setItem('gnsc_mstores',JSON.stringify(masterStores)); }
+    if(d.trans    !== undefined) { masterTrans   =d.trans||[];    localStorage.setItem('gnsc_mtrans', JSON.stringify(masterTrans)); }
+    if(d.types    !== undefined) { masterTypes   =d.types||[];    localStorage.setItem('gnsc_mtypes', JSON.stringify(masterTypes)); }
+    if(d.indent   !== undefined) { masterIndent  =d.indent||{};   localStorage.setItem('gnsc_indent', JSON.stringify(masterIndent)); }
     if(d.docks && Array.isArray(d.docks) && !d.docks.includes('D1') && !d.docks.includes('D2')) {
       DOCKS=d.docks; localStorage.setItem('gnsc_docks',JSON.stringify(DOCKS));
     }
-    localStorage.setItem('gnsc_master',  JSON.stringify(masterVehicles));
-    localStorage.setItem('gnsc_mstores', JSON.stringify(masterStores));
-    localStorage.setItem('gnsc_mtrans',  JSON.stringify(masterTrans));
-    localStorage.setItem('gnsc_mtypes',  JSON.stringify(masterTypes));
-    localStorage.setItem('gnsc_indent',  JSON.stringify(masterIndent));
     if(currentRole) refreshDL();
   });
   // Daily data listener (indent, tomorrow plan, docks, lastday)
@@ -740,6 +735,19 @@ function oMo(title, body) {
   document.getElementById('mo').classList.add('on');
 }
 function cMo() { document.getElementById('mo').classList.remove('on'); }
+function clearMaster(type) {
+  const names={vehicles:'Fleet Master',stores:'Store Master',docks:'Dock Master',trans:'Transporter Master',types:'Vehicle Types',indent:'Monthly Indent Plan'};
+  if(!confirm(`Clear ${names[type]||type}? This cannot be undone.`)) return;
+  if(type==='vehicles') { masterVehicles=[]; localStorage.setItem('gnsc_master','[]'); }
+  if(type==='stores')   { masterStores=[];   localStorage.setItem('gnsc_mstores','[]'); }
+  if(type==='docks')    { DOCKS=[...DEFAULT_DOCKS]; localStorage.setItem('gnsc_docks',JSON.stringify(DOCKS)); }
+  if(type==='trans')    { masterTrans=[];    localStorage.setItem('gnsc_mtrans','[]'); }
+  if(type==='types')    { masterTypes=['24ft','32ft','Container','LCV','Pickup','Other']; localStorage.setItem('gnsc_mtypes',JSON.stringify(masterTypes)); }
+  if(type==='indent')   { masterIndent={};   localStorage.setItem('gnsc_indent','{}'); }
+  saveMasters();
+  toast(`✅ ${names[type]} cleared`);
+  renderMasters();
+}
 function clearData() {
   if(!confirm('Clear all operational data? Masters will be kept.')) return;
   // Clear localStorage
@@ -4009,6 +4017,15 @@ function renderMasters() {
       </div>
       <div id="danger_body" style="display:none;border-top:1px solid var(--red);padding:12px 13px">
         <button onclick="clearData()" style="width:100%;padding:11px;background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px">🗑 Clear Today's Data — keep masters</button>
+        <div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Clear Specific Master</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+          <button onclick="clearMaster('vehicles')" style="padding:9px;background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">🚛 Fleet Master</button>
+          <button onclick="clearMaster('stores')"   style="padding:9px;background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">🏪 Store Master</button>
+          <button onclick="clearMaster('docks')"    style="padding:9px;background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">🔋 Dock Master</button>
+          <button onclick="clearMaster('trans')"    style="padding:9px;background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">🏢 Transporter</button>
+          <button onclick="clearMaster('types')"    style="padding:9px;background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">📐 Vehicle Types</button>
+          <button onclick="clearMaster('indent')"   style="padding:9px;background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">📦 Indent Plan</button>
+        </div>
         <button onclick="clearAll()" style="width:100%;padding:11px;background:var(--rdd);border:1px solid var(--red);color:var(--red);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">⚠️ Reset Everything — delete all data & masters</button>
       </div>
     </div>
