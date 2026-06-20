@@ -603,7 +603,7 @@ function sanitize(obj) {
   return JSON.parse(JSON.stringify(obj, (k,v)=>v===undefined?null:v));
 }
 
-function save() {
+function save(dayKeyOverride) {
   // actLog: keep last 24 hours only
   const cutTs=Date.now()-(24*60*60*1000);
   actLog=actLog.filter(a=>!a.ts||a.ts>=cutTs);
@@ -620,8 +620,7 @@ function save() {
   // Push to Firebase
   if(typeof db!=='undefined') {
     _ignoreNext=true;
-    const payload=sanitize({routes,vehicles,actLog:actLog.slice(-200),dayHist,ts:Date.now()});
-    console.log('🔥 Pushing to Firebase — routes:'+routes.length+' vehicles:'+vehicles.length);
+    const payload=sanitize({routes,vehicles,actLog:actLog.slice(-200),dayHist,ts:Date.now(),dayKey:dayKeyOverride||TODAY});
     db.ref('gnsc/live').set(payload)
       .then(()=>console.log('✅ Firebase push success'))
       .catch(e=>{ console.error('❌ Firebase save error:',e); toast('⚠️ Sync error — check connection','err'); });
@@ -654,15 +653,18 @@ function startFirebaseSync() {
   db.ref('gnsc/live').on('value',snap=>{
     if(_ignoreNext){_ignoreNext=false;return;}
     const d=snap.val(); if(!d) return;
-    // Guard: don't restore yesterday's data if day has been reset
-    const localLast=localStorage.getItem('gnsc_lastday');
-    if(localLast===getToday()&&d.routes?.length) {
-      const fbRouteDate=(d.routes[0]?.date)||(d.routes.find(r=>r.date)?.date);
-      if(fbRouteDate&&fbRouteDate<getToday()) {
-        console.log('🚫 Ignoring stale Firebase data from '+fbRouteDate+' — local is reset for '+getToday());
-        return;
+
+    // PRIMARY GUARD: dayKey tells us which day this data belongs to
+    // If Firebase data is from yesterday → ignore entirely, do not restore
+    if(d.dayKey && d.dayKey < getToday()) {
+      console.log('🚫 Live data is from '+d.dayKey+' — ignoring, today is '+getToday());
+      // Update local lastday so this device knows today needs fresh data
+      if(localStorage.getItem('gnsc_lastday') !== getToday()) {
+        localStorage.setItem('gnsc_lastday', d.dayKey); // mark as yesterday so checkDay runs
       }
+      return;
     }
+
     routes  =d.routes  ||[];
     vehicles=d.vehicles||[];
     actLog  =d.actLog  ||[];
@@ -671,6 +673,8 @@ function startFirebaseSync() {
     localStorage.setItem('gnsc_vehicles', JSON.stringify(vehicles));
     localStorage.setItem('gnsc_actlog',   JSON.stringify(actLog));
     localStorage.setItem('gnsc_dayhist',  JSON.stringify(dayHist));
+    // Sync lastday from Firebase data
+    if(d.dayKey) localStorage.setItem('gnsc_lastday', d.dayKey);
     if(currentRole){renderAll();updateCutBan();}
   });
   // Masters listener — always overwrite local with Firebase (Firebase is source of truth)
@@ -1271,7 +1275,9 @@ function renderPage(tab) {
   else if(tab==='log')     renderLog();
   updateBadges();
 }
-function renderAll() { renderCOBan(); renderPage(currentTab); }
+function renderAll() {
+  renderCOBan(); renderPage(currentTab);
+}
 function updateBadges() {
   const shorts=routes.filter(r=>rSt(r)==='short').length;
   const breaks=vehicles.filter(v=>v.status==='breakdown').length;
@@ -2296,9 +2302,9 @@ function renderWHDash() {
   const now=nowMins();
   const total=routes.length;
   const notIn=routes.filter(r=>rSt(r)==='planned');
-  const pendD =vehicles.filter(v=>v.status==='inside'&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete);
-  const atD   =vehicles.filter(v=>v.status==='dock'&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete);
-  const loaded =vehicles.filter(v=>v.status==='loaded'&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete);
+  const pendD =vehicles.filter(v=>v.status==='inside'&&(v.routeId||v.isCarryOver)&&!v.isUnplanned&&!v.masterIncomplete);
+  const atD   =vehicles.filter(v=>v.status==='dock'&&(v.routeId||v.isCarryOver)&&!v.isUnplanned&&!v.masterIncomplete);
+  const loaded =vehicles.filter(v=>v.status==='loaded'&&(v.routeId||v.isCarryOver)&&!v.isUnplanned&&!v.masterIncomplete);
   const departed=vehicles.filter(v=>v.status==='out'&&!v.isUnplanned&&!v.masterIncomplete);
   // Yesterday carry-overs visible to warehouse
   const ydayPend=pendD.filter(v=>v.isCarryOver);
@@ -2472,7 +2478,7 @@ function renderUpdate() {
   }
 
   myDefs.forEach(sec=>{
-    const list=vehicles.filter(v=>sec.sts.includes(v.status)&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete).sort((a,b)=>t2m(vEta(a)||'23:59')-t2m(vEta(b)||'23:59'));
+    const list=vehicles.filter(v=>sec.sts.includes(v.status)&&(v.routeId||v.isCarryOver)&&!v.isUnplanned&&!v.masterIncomplete).sort((a,b)=>t2m(vEta(a)||'23:59')-t2m(vEta(b)||'23:59'));
     html+=`<div class="sec" style="margin-bottom:8px">${sec.t} <span class="sec-b">${list.length}</span></div>`;
     if(!list.length){ html+=`<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:12px;text-align:center;font-size:12px;color:var(--dim);margin-bottom:12px">None</div>`; return; }
 
@@ -2944,6 +2950,12 @@ function gSearch(val) {
         <div style="font-family:var(--mono);font-weight:800;font-size:17px;color:var(--grn);margin-bottom:4px">${esc(v.number)}</div>
         <div style="font-size:11px;color:var(--mut);margin-bottom:11px">📦 Loaded · Ready to depart</div>
         <button class="act-btn" style="background:var(--acc);color:#000;margin-bottom:0" onclick="confirmOut('${v.id}');gClear()">✅ Gate OUT</button>
+      </div>`;
+    } else if(v.status==='inside'||v.status==='dock') {
+      res.innerHTML=`<div style="background:var(--bld);border:1px solid var(--blu);border-radius:var(--r);padding:13px">
+        <div style="font-family:var(--mono);font-weight:800;font-size:16px;color:var(--blu)">${esc(v.number)}</div>
+        <div style="font-size:12px;color:var(--mut);margin-top:3px">🏭 Already inside GNSC — ${SL[v.status]}</div>
+        <div style="font-size:11px;color:var(--red);margin-top:5px;font-weight:700">⚠️ Do not inward again</div>
       </div>`;
     } else {
       res.innerHTML=`<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:13px">
@@ -3692,7 +3704,7 @@ function activateTomorrowNow() {
   // Clear tomorrow queue
   tomorrowPlan=[];
   localStorage.setItem('gnsc_tomorrow',JSON.stringify(tomorrowPlan));
-  saveMasters(); save(); syncDaily();
+  saveMasters(); save(nextDate); syncDaily(); // stamp nextDate as dayKey so midnight guard works
   log('TRANSPORT',`⚡ Tomorrow's plan activated early — ${ra} routes, ${va} vehicles`,'var(--acc)');
   toast(`⚡ Plan activated — ${ra} routes · ${va} vehicles · midnight will not reset`);
   if(skipped.length) setTimeout(()=>alert('⚠️ '+skipped.length+' vehicles skipped (not in master or busy):\n'+skipped.join(', ')),300);
@@ -4448,7 +4460,7 @@ function renderAnalytics() {
 // ─────────────────────────────────────────────
 function renderLog() {
   const el=document.getElementById('pg-log'); if(!el||!el.classList.contains('on')) return;
-  el.innerHTML=`<div class="pg-h"><div><div class="pg-t">Activity Log</div><div class="pg-s">${actLog.length} events · 30 days retained</div></div></div>
+  el.innerHTML=`<div class="pg-h"><div><div class="pg-t">Activity Log</div><div class="pg-s">${actLog.length} events · 24 hrs retained</div></div></div>
     <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:10px 12px">
       ${actLog.length?actLog.map(a=>`<div style="display:flex;gap:9px;padding:8px 0;border-bottom:1px solid var(--bdr2)"><div style="width:7px;height:7px;border-radius:50%;background:${a.color};margin-top:5px;flex-shrink:0"></div><div><div style="font-size:12px"><strong>${esc(a.who)}</strong> — ${esc(a.msg)}</div><div style="font-family:var(--mono);font-size:10px;color:var(--mut)">${a.time} · ${a.date||''}</div></div></div>`).join('')
       :`<div class="empty"><div class="empty-ic">📋</div><div class="empty-t">No events logged</div></div>`}
