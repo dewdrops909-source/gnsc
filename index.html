@@ -654,12 +654,12 @@ function startFirebaseSync() {
   db.ref('gnsc/live').on('value',snap=>{
     if(_ignoreNext){_ignoreNext=false;return;}
     const d=snap.val(); if(!d) return;
-    // Guard: don't restore yesterday's data if local day has already reset
+    // Guard: don't restore yesterday's data if day has been reset
     const localLast=localStorage.getItem('gnsc_lastday');
     if(localLast===getToday()&&d.routes?.length) {
       const fbRouteDate=(d.routes[0]?.date)||(d.routes.find(r=>r.date)?.date);
       if(fbRouteDate&&fbRouteDate<getToday()) {
-        console.log('🚫 Ignoring stale Firebase data from '+fbRouteDate);
+        console.log('🚫 Ignoring stale Firebase data from '+fbRouteDate+' — local is reset for '+getToday());
         return;
       }
     }
@@ -911,7 +911,7 @@ function markCarryOvers(todayDate) {
   });
   if(changed) { save(); console.log('markCarryOvers: old vehicles/routes flagged as YDAY'); }
 }
-function checkDay() {
+async function checkDay() {
   TODAY = getToday();
   const last = localStorage.getItem('gnsc_lastday');
 
@@ -922,7 +922,16 @@ function checkDay() {
     return;
   }
 
-  // GUARD 2: If Firebase already has today's data, just update lastday locally — don't reset
+  // GUARD 2: If Firebase already has today's data OR Firebase lastday says today is done
+  const fbLastday = await new Promise(res=>{
+    if(typeof db==='undefined') { res(null); return; }
+    db.ref('gnsc/daily/lastday').once('value').then(s=>res(s.val())).catch(()=>res(null));
+  }).catch(()=>null);
+  if(fbLastday===TODAY) {
+    localStorage.setItem('gnsc_lastday', TODAY);
+    console.log('checkDay: Firebase lastday=today — skip reset');
+    return;
+  }
   const hasToday = routes.some(r=>r.date===TODAY) || vehicles.some(v=>v.date===TODAY);
   if(hasToday) {
     localStorage.setItem('gnsc_lastday', TODAY);
@@ -1014,6 +1023,11 @@ function checkDay() {
     if(co) msgs.push(co+' carry-over vehicles (not in plan)');
     if(skipped.length) msgs.push(skipped.length+' vehicles skipped (undispatched)');
     if(msgs.length) toast('🌅 New day · '+msgs.join(' · '));
+
+    // Clear actual indent for new day
+    actualIndent=0;
+    localStorage.setItem('gnsc_actual_indent','0');
+    localStorage.setItem('gnsc_indent_date',TODAY);
 
     save();
     syncDaily();
@@ -3658,6 +3672,11 @@ function activateTomorrowNow() {
   // so YDAY flags show right away without waiting for midnight
   markCarryOvers(nextDate);
 
+  // Clear actual indent for new day
+  actualIndent=0;
+  localStorage.setItem('gnsc_actual_indent','0');
+  localStorage.setItem('gnsc_indent_date',nextDate);
+
   // Push nextDate to Firebase lastday so all devices know day is handled
   if(typeof db!=='undefined') db.ref('gnsc/daily/lastday').set(nextDate).catch(e=>console.warn(e));
   localStorage.setItem('gnsc_lastday', nextDate);
@@ -4019,7 +4038,7 @@ function renderMasters() {
 }
 
 function addUserMo() {
-  const roles=['leader','transport','warehouse','gate'];
+  const roles=['leader','transport','warehouse','gate','pilot','admin'];
   oMo('➕ Add User',`
     <div class="field"><label>Username</label><input id="nuUser" type="text" placeholder="username" autocapitalize="none" autocorrect="off"></div>
     <div class="field"><label>Password</label><input id="nuPass" type="text" placeholder="password"></div>
@@ -4039,7 +4058,7 @@ function saveNewUser() {
 }
 function editUserMo(username) {
   const u=appUsers[username]; if(!u) return;
-  const roles=['leader','transport','warehouse','gate','admin'];
+  const roles=['leader','transport','warehouse','gate','pilot','admin'];
   oMo('✏️ Edit User — '+username,`
     <div class="field"><label>Password</label><input id="euPass" type="text" value="${u.password}"></div>
     <div class="field"><label>Role</label><select id="euRole">${roles.map(r=>`<option value="${r}"${r===u.role?' selected':''}>${r}</option>`).join('')}</select></div>
