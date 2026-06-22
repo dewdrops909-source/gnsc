@@ -451,7 +451,12 @@ window.addEventListener('unhandledrejection',e=>{
 // ─────────────────────────────────────────────
 // DATA
 // ─────────────────────────────────────────────
-function getToday() { return new Date().toISOString().slice(0,10); }
+function getToday() {
+  // Always use IST (UTC+5:30) regardless of device timezone
+  const now = new Date();
+  const ist = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+  return ist.toISOString().slice(0,10);
+}
 let TODAY = getToday();
 
 let routes         = JSON.parse(localStorage.getItem('gnsc_routes')    || '[]');
@@ -655,16 +660,15 @@ function startFirebaseSync() {
     const d=snap.val(); if(!d) return;
 
     // PRIMARY GUARD: dayKey tells us which day this data belongs to
-    // If Firebase data is from yesterday → ignore entirely, do not restore
     if(d.dayKey && d.dayKey < getToday()) {
       console.log('🚫 Live data is from '+d.dayKey+' — ignoring, today is '+getToday());
-      // Update local lastday so this device knows today needs fresh data
       if(localStorage.getItem('gnsc_lastday') !== getToday()) {
-        localStorage.setItem('gnsc_lastday', d.dayKey); // mark as yesterday so checkDay runs
+        localStorage.setItem('gnsc_lastday', d.dayKey);
       }
       return;
     }
 
+    // Accept data — including empty arrays from clearData()
     routes  =d.routes  ||[];
     vehicles=d.vehicles||[];
     actLog  =d.actLog  ||[];
@@ -673,7 +677,6 @@ function startFirebaseSync() {
     localStorage.setItem('gnsc_vehicles', JSON.stringify(vehicles));
     localStorage.setItem('gnsc_actlog',   JSON.stringify(actLog));
     localStorage.setItem('gnsc_dayhist',  JSON.stringify(dayHist));
-    // Sync lastday from Firebase data
     if(d.dayKey) localStorage.setItem('gnsc_lastday', d.dayKey);
     if(currentRole){renderAll();updateCutBan();}
   });
@@ -754,17 +757,23 @@ function clearMaster(type) {
 }
 function clearData() {
   if(!confirm('Clear all operational data? Masters will be kept.')) return;
+  routes=[]; vehicles=[]; actLog=[]; dayHist=[];
+  actualIndent=0; tomorrowPlan=[];
   // Clear localStorage
   ['gnsc_routes','gnsc_vehicles','gnsc_actlog','gnsc_loadhist','gnsc_dayhist',
-   'gnsc_lastday','gnsc_tomorrow','gnsc_actual_indent','gnsc_indent_date',
-   'gnsc_gate_alerts','gnsc_todayindent'].forEach(k=>localStorage.removeItem(k));
-  // Clear Firebase live & daily data
+   'gnsc_tomorrow','gnsc_actual_indent','gnsc_indent_date',
+   'gnsc_gate_alerts'].forEach(k=>localStorage.removeItem(k));
+  localStorage.setItem('gnsc_lastday', getToday());
+  // Push empty state to Firebase with today's dayKey — forces all devices to clear
   if(typeof db!=='undefined') {
-    db.ref('gnsc/live').remove();
-    db.ref('gnsc/daily').remove();
+    const emptyPayload={routes:[],vehicles:[],actLog:[],dayHist:[],ts:Date.now(),dayKey:getToday()};
+    db.ref('gnsc/live').set(emptyPayload);
+    db.ref('gnsc/daily').update({lastday:getToday(),actualIndent:0,tomorrowPlan:[]});
     db.ref('gnsc/gate_alerts').remove();
+    db.ref('gnsc/notifications').remove();
   }
-  location.reload();
+  toast('✅ Data cleared — all devices will sync');
+  setTimeout(()=>location.reload(), 1500);
 }
 function clearAll() {
   if(!confirm('Clear EVERYTHING including masters? This cannot be undone.')) return;
@@ -1239,9 +1248,11 @@ function saveIndent() {
   switchTab('dashboard');
 }
 function tick() {
-  const d=new Date();
+  // Use IST for header date display
+  const now=new Date();
+  const ist=new Date(now.getTime()+(5.5*60*60*1000));
   const el=document.getElementById('hDate');
-  if(el) el.textContent=d.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
+  if(el) el.textContent=ist.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short',timeZone:'Asia/Kolkata'});
 }
 function buildTabs(role) {
   const tabRole=role||currentRole;
