@@ -866,7 +866,6 @@ function updateStatus(vid, newStatus) {
     const alerts=getGateAlerts().filter(a=>a.vid!==vid);
     alerts.unshift({id:Date.now().toString(36),vid,vnum:v.number,dock:v.dock,time:nowTime(),ts:Date.now(),ack:false,sentBy:'Warehouse',type:'loaded',msg:'Loaded — clear from dock'});
     saveGateAlerts(alerts.slice(0,20));
-    pushNotifToAll('gate','📦 Clear Dock — GNSC',`Remove ${v.number} from Dock ${v.dock}`);
     pushNotifToAll('pilot','📦 Clear Dock — GNSC',`Remove ${v.number} from Dock ${v.dock}`);
     // Remove prechill flag when loaded
     if(v.prechill) { v.prechill=false; v.prechillConfirmed=false; }
@@ -2523,7 +2522,7 @@ function renderUpdate() {
               <div style="text-align:right">
                 <div style="font-size:10px;color:var(--mut)">In since ${v.times?.inside||'—'}</div>
                 <button onclick="sendGateAlert('${v.id}','${esc(v.number)}')" style="margin-top:4px;display:flex;align-items:center;gap:5px;background:${alertAcked?'var(--gnd)':alertPending?'var(--ogd)':'var(--sur2)'};border:1px solid ${alertAcked?'var(--grn)':alertPending?'var(--org)':'var(--bdr)'};color:${alertAcked?'var(--grn)':alertPending?'var(--org)':'var(--mut)'};border-radius:6px;padding:4px 9px;font-size:10px;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif">
-                  ${alertAcked?`<span style="width:8px;height:8px;border-radius:50%;background:var(--grn);display:inline-block"></span> ${confirmedBy} ✓`:alertPending?'📢 Alerted':'📢 Alert Gate'}
+                  ${alertAcked?`<span style="width:8px;height:8px;border-radius:50%;background:var(--grn);display:inline-block"></span> ${confirmedBy} ✓ ${existingAlert?.ackTime||''}`:alertPending?'📢 Pilot Alerted':'📢 Alert Pilot'}
                 </button>
               </div>
             </div>
@@ -2741,9 +2740,8 @@ function doSendGateAlert(vid, vnum, dock) {
   alerts.unshift({id:Date.now().toString(36),vid,vnum,dock,time:nowTime(),ts:Date.now(),ack:false,sentBy:'Warehouse',type:'dock'});
   saveGateAlerts(alerts.slice(0,50));
   // Push notification to Gate + Pilot
-  pushNotifToAll('gate','📢 Place on Dock — GNSC',`Place ${vnum} on Dock ${dock}`);
   pushNotifToAll('pilot','📢 Place on Dock — GNSC',`Place ${vnum} on Dock ${dock}`);
-  cMo(); toast('📢 Gate & Pilot alerted — '+vnum+' → '+dock); renderUpdate();
+  cMo(); toast('📢 Pilot alerted — '+vnum+' → '+dock); renderUpdate();
 }
 
 // Gate alert polling — runs every 4 seconds for gate role
@@ -2779,20 +2777,31 @@ function checkGateAlerts() {
       </div>
       <button onclick="ackGateAlert('${a.id||a.vid}')" style="background:#000;color:var(--acc);border:none;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0">✓ Done</button>
     </div>${alerts.indexOf(a)<alerts.length-1?'<div style="border-top:1px solid rgba(0,0,0,.2)"></div>':''}`).join('');
-  // Send push notification for background alerts to all gate devices
+  // Send push notification to pilot only
   alerts.forEach(a=>{
-    pushNotifToAll('gate',
+    pushNotifToAll('pilot',
       a.type==='loaded'?'📦 Clear Dock — GNSC':a.type==='prechill'?'❄️ Prechill — GNSC':'📢 Dock Alert — GNSC',
       a.type==='loaded'?`Remove ${a.vnum} from Dock ${a.dock}`:a.type==='prechill'?`Prechill ${a.vnum}`:`Place ${a.vnum} on Dock ${a.dock}`
     );
   });
-  startAlertRepeat(alerts); // repeating beep + vibration + wake lock + title flash
+  startAlertRepeat(alerts);
 }
 // ─────────────────────────────────────────────
 // ENHANCED ALERT SYSTEM (for Gate + Pilot)
 // ─────────────────────────────────────────────
 let _alertRepeatInterval=null;
 let _wakeLock=null;
+let _audioCtx=null;
+
+function getAudioCtx() {
+  if(!_audioCtx) _audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+  if(_audioCtx.state==='suspended') _audioCtx.resume();
+  return _audioCtx;
+}
+
+// Resume audio on first user tap — required by iOS/Android
+document.addEventListener('click',()=>{ try{ getAudioCtx(); }catch(e){} },{once:false,passive:true});
+document.addEventListener('touchstart',()=>{ try{ getAudioCtx(); }catch(e){} },{once:false,passive:true});
 
 async function requestWakeLock() {
   try {
@@ -2807,19 +2816,43 @@ function releaseWakeLock() {
 
 function playAlertSound() {
   try {
-    const ctx=new (window.AudioContext||window.webkitAudioContext)();
-    // Long urgent beep pattern — 3 beeps, each 0.4s
-    [0,500,1000].forEach(delay=>{
-      const osc=ctx.createOscillator(), gain=ctx.createGain();
-      osc.connect(gain); gain.connect(ctx.destination);
-      osc.frequency.value=960; osc.type='square';
-      gain.gain.setValueAtTime(0,ctx.currentTime+delay/1000);
-      gain.gain.linearRampToValueAtTime(0.4,ctx.currentTime+delay/1000+0.05);
-      gain.gain.setValueAtTime(0.4,ctx.currentTime+delay/1000+0.35);
-      gain.gain.linearRampToValueAtTime(0,ctx.currentTime+delay/1000+0.4);
-      osc.start(ctx.currentTime+delay/1000);
-      osc.stop(ctx.currentTime+delay/1000+0.4);
-    });
+    const ctx=getAudioCtx();
+    if(!ctx) return;
+    stopAlertSound(); // stop any existing
+    const osc=ctx.createOscillator(), gain=ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value=880; osc.type='square';
+    // Continuous beep pattern — 0.3s on, 0.2s off, forever
+    function scheduleBeeps(startTime, count) {
+      for(let i=0;i<count;i++){
+        const t=startTime+(i*0.5);
+        gain.gain.setValueAtTime(0.5, t);
+        gain.gain.setValueAtTime(0, t+0.3);
+      }
+    }
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    scheduleBeeps(ctx.currentTime, 40); // schedule 20 seconds worth
+    osc.start(ctx.currentTime);
+    window._alertOsc=osc;
+    window._alertGain=gain;
+    window._alertCtxRef=ctx;
+    // Reschedule before sound ends to keep it continuous
+    window._alertReschedule=setInterval(()=>{
+      if(!window._alertOsc) { clearInterval(window._alertReschedule); return; }
+      scheduleBeeps(ctx.currentTime+0.1, 40);
+    }, 18000);
+  } catch(e){ console.warn('Audio error:',e); }
+}
+
+function stopAlertSound() {
+  try {
+    if(window._alertReschedule) { clearInterval(window._alertReschedule); window._alertReschedule=null; }
+    if(window._alertOsc) {
+      window._alertOsc.stop();
+      window._alertOsc.disconnect();
+      window._alertOsc=null;
+    }
+    if(window._alertGain) { window._alertGain.disconnect(); window._alertGain=null; }
   } catch(e){}
 }
 
@@ -2849,13 +2882,12 @@ function startAlertRepeat(alerts) {
       flashCount++;
     },300);
   }
-  // Repeat sound every 20 seconds until acknowledged
+  // Reschedule vibration every 10 seconds while alert is pending
   _alertRepeatInterval=setInterval(()=>{
     const pending=getGateAlerts().filter(a=>!a.ack);
     if(!pending.length) { stopAlertRepeat(); clearInterval(titleInterval); document.title=origTitle; return; }
-    playAlertSound();
     if(navigator.vibrate) navigator.vibrate([200,100,200]);
-  },20000);
+  },10000);
   // Store titleInterval for cleanup
   window._titleInterval=titleInterval;
   window._origTitle=origTitle;
@@ -3410,7 +3442,6 @@ function requestPrechill(vid, vnum) {
   alerts.unshift({id:Date.now().toString(36),vid,vnum,dock:'—',time:nowTime(),ts:Date.now(),ack:false,sentBy:'Warehouse',type:'prechill',msg:'Prechill vehicle before dock'});
   saveGateAlerts(alerts.slice(0,50));
   // Push to Gate + Pilot
-  pushNotifToAll('gate','❄️ Prechill Request — GNSC',`Prechill ${vnum} before dock placement`);
   pushNotifToAll('pilot','❄️ Prechill Request — GNSC',`Prechill ${vnum} before dock placement`);
   save(); renderAll();
   toast('❄️ Prechill requested — Gate & Pilot alerted');
@@ -3424,6 +3455,9 @@ function ackGateAlert(alertId) {
         const v=vehicles.find(x=>x.id===a.vid);
         if(v) { v.prechillConfirmed=true; save(); }
       }
+      // Push confirmation to warehouse
+      const actionLabel=a.type==='prechill'?'Prechill done':a.type==='loaded'?'Dock cleared':'Placed on dock';
+      pushNotifToAll('warehouse',`✅ ${confirmedBy} confirmed — ${a.vnum}`,`${actionLabel}${a.dock&&a.dock!=='—'?' · Dock '+a.dock:''} · ${nowTime()}`);
       return {...a,ack:true,ackTime:nowTime(),confirmedBy};
     }
     return a;
@@ -3431,7 +3465,7 @@ function ackGateAlert(alertId) {
   saveGateAlerts(alerts);
   // Stop repeating alert if no more pending
   const stillPending=alerts.filter(a=>!a.ack);
-  if(!stillPending.length) stopAlertRepeat();
+  if(!stillPending.length) { stopAlertRepeat(); stopAlertSound(); }
   const banner=document.getElementById('gateBanner');
   if(banner) { renderAll(); }
 }
