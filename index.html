@@ -1205,8 +1205,6 @@ function sel(role) {
   if(role==='transport') checkIndentPrompt();
 }
 function checkIndentPrompt() {
-  const last=localStorage.getItem('gnsc_indent_date');
-  if(last===TODAY) return;
   const planned=masterIndent[TODAY]||0;
   const actual=actualIndent||0;
   oMo('📦 Today\'s Production Indent',`
