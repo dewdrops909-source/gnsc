@@ -1683,8 +1683,10 @@ function doChangeVehicle(rid, newVid) {
   const newV=vehicles.find(x=>x.id===newVid); if(!newV) return;
   // Release old vehicle to pool
   if(oldV) { oldV.routeId=null; }
-  // Assign new vehicle to route
+  // Assign new vehicle to route — clear unplanned flags so warehouse can dock it
   newV.routeId=rid;
+  newV.isUnplanned=false;
+  newV.masterIncomplete=false;
   r.vehicleId=newVid;
   r.status=newV.status;
   log(r.routeNo,'🔀 Vehicle changed: '+(oldV?oldV.number:'none')+' → '+newV.number,'var(--blu)');
@@ -2317,9 +2319,9 @@ function renderWHDash() {
   const now=nowMins();
   const total=routes.length;
   const notIn=routes.filter(r=>rSt(r)==='planned');
-  const pendD =vehicles.filter(v=>v.status==='inside'&&(v.routeId||v.isCarryOver)&&!v.isUnplanned&&!v.masterIncomplete);
-  const atD   =vehicles.filter(v=>v.status==='dock'&&(v.routeId||v.isCarryOver)&&!v.isUnplanned&&!v.masterIncomplete);
-  const loaded =vehicles.filter(v=>v.status==='loaded'&&(v.routeId||v.isCarryOver)&&!v.isUnplanned&&!v.masterIncomplete);
+  const pendD =vehicles.filter(v=>v.status==='inside'&&v.routeId);
+  const atD   =vehicles.filter(v=>v.status==='dock'&&v.routeId);
+  const loaded =vehicles.filter(v=>v.status==='loaded'&&v.routeId);
   const departed=vehicles.filter(v=>v.status==='out'&&!v.isUnplanned&&!v.masterIncomplete);
   // Yesterday carry-overs visible to warehouse
   const ydayPend=pendD.filter(v=>v.isCarryOver);
@@ -2493,7 +2495,7 @@ function renderUpdate() {
   }
 
   myDefs.forEach(sec=>{
-    const list=vehicles.filter(v=>sec.sts.includes(v.status)&&(v.routeId||v.isCarryOver)&&!v.isUnplanned&&!v.masterIncomplete).sort((a,b)=>t2m(vEta(a)||'23:59')-t2m(vEta(b)||'23:59'));
+    const list=vehicles.filter(v=>sec.sts.includes(v.status)&&v.routeId).sort((a,b)=>t2m(vEta(a)||'23:59')-t2m(vEta(b)||'23:59'));
     html+=`<div class="sec" style="margin-bottom:8px">${sec.t} <span class="sec-b">${list.length}</span></div>`;
     if(!list.length){ html+=`<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:12px;text-align:center;font-size:12px;color:var(--dim);margin-bottom:12px">None</div>`; return; }
 
