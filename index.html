@@ -2800,13 +2800,58 @@ let _audioCtx=null;
 
 function getAudioCtx() {
   if(!_audioCtx) _audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-  if(_audioCtx.state==='suspended') _audioCtx.resume();
+  if(_audioCtx.state==='suspended') _audioCtx.resume().catch(()=>{});
   return _audioCtx;
 }
 
 // Resume audio on first user tap — required by iOS/Android
-document.addEventListener('click',()=>{ try{ getAudioCtx(); }catch(e){} },{once:false,passive:true});
-document.addEventListener('touchstart',()=>{ try{ getAudioCtx(); }catch(e){} },{once:false,passive:true});
+document.addEventListener('click',()=>{ try{ getAudioCtx(); }catch(e){} },{passive:true});
+document.addEventListener('touchstart',()=>{ try{ getAudioCtx(); }catch(e){} },{passive:true});
+
+function playAlertSound() {
+  try {
+    const ctx=getAudioCtx();
+    if(!ctx) return;
+    stopAlertSound();
+
+    const osc=ctx.createOscillator();
+    const gainNode=ctx.createGain();
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    osc.type='square';
+    osc.frequency.value=880;
+
+    // Schedule beep pattern: 0.3s ON, 0.2s OFF, repeat
+    const now=ctx.currentTime;
+    gainNode.gain.setValueAtTime(0, now);
+    for(let i=0;i<200;i++){  // 200 cycles = ~100 seconds
+      const t=now+(i*0.5);
+      gainNode.gain.setValueAtTime(0.6, t);
+      gainNode.gain.setValueAtTime(0, t+0.3);
+    }
+    osc.start(now);
+    // Don't call osc.stop() — let stopAlertSound() handle it
+
+    window._alertOsc=osc;
+    window._alertGain=gainNode;
+    window._alertCtxRef=ctx;
+  } catch(e){ console.warn('Audio error:',e); }
+}
+
+function stopAlertSound() {
+  try {
+    if(window._alertReschedule) { clearInterval(window._alertReschedule); window._alertReschedule=null; }
+    if(window._alertOsc) {
+      try { window._alertOsc.stop(0); } catch(e){}
+      try { window._alertOsc.disconnect(); } catch(e){}
+      window._alertOsc=null;
+    }
+    if(window._alertGain) {
+      try { window._alertGain.disconnect(); } catch(e){}
+      window._alertGain=null;
+    }
+  } catch(e){}
+}
 
 async function requestWakeLock() {
   try {
@@ -2819,52 +2864,10 @@ function releaseWakeLock() {
   if(_wakeLock) { _wakeLock.release().catch(()=>{}); _wakeLock=null; }
 }
 
-function playAlertSound() {
-  try {
-    const ctx=getAudioCtx();
-    if(!ctx) return;
-    stopAlertSound(); // stop any existing
-    const osc=ctx.createOscillator(), gain=ctx.createGain();
-    osc.connect(gain); gain.connect(ctx.destination);
-    osc.frequency.value=880; osc.type='square';
-    // Continuous beep pattern — 0.3s on, 0.2s off, forever
-    function scheduleBeeps(startTime, count) {
-      for(let i=0;i<count;i++){
-        const t=startTime+(i*0.5);
-        gain.gain.setValueAtTime(0.5, t);
-        gain.gain.setValueAtTime(0, t+0.3);
-      }
-    }
-    gain.gain.setValueAtTime(0, ctx.currentTime);
-    scheduleBeeps(ctx.currentTime, 40); // schedule 20 seconds worth
-    osc.start(ctx.currentTime);
-    window._alertOsc=osc;
-    window._alertGain=gain;
-    window._alertCtxRef=ctx;
-    // Reschedule before sound ends to keep it continuous
-    window._alertReschedule=setInterval(()=>{
-      if(!window._alertOsc) { clearInterval(window._alertReschedule); return; }
-      scheduleBeeps(ctx.currentTime+0.1, 40);
-    }, 18000);
-  } catch(e){ console.warn('Audio error:',e); }
-}
-
-function stopAlertSound() {
-  try {
-    if(window._alertReschedule) { clearInterval(window._alertReschedule); window._alertReschedule=null; }
-    if(window._alertOsc) {
-      window._alertOsc.stop();
-      window._alertOsc.disconnect();
-      window._alertOsc=null;
-    }
-    if(window._alertGain) { window._alertGain.disconnect(); window._alertGain=null; }
-  } catch(e){}
-}
-
 function startAlertRepeat(alerts) {
   stopAlertRepeat();
   if(!alerts.length) return;
-  // Vibrate
+  playAlertSound(); // start continuous beep immediately
   if(navigator.vibrate) navigator.vibrate([300,100,300,100,600]);
   // Wake lock — keep screen on
   requestWakeLock();
