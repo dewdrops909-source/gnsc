@@ -1408,7 +1408,7 @@ function renderDash() {
       ${ydayRoutes.length>5?`<div style="font-size:10px;color:var(--org);text-align:center;padding-top:5px">+${ydayRoutes.length-5} more</div>`:''}
     </div>`:''}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-      <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:20px;padding:6px 14px;display:inline-flex;align-items:baseline;gap:8px">
+      <div onclick="${(currentRole==='transport'||currentRole==='admin')&&!(actualIndent>0&&currentRole!=='admin')?'checkIndentPrompt()':''}" style="background:var(--sur);border:1px solid var(--bdr);border-radius:20px;padding:6px 14px;display:inline-flex;align-items:baseline;gap:8px;cursor:${(currentRole==='transport'||currentRole==='admin')&&!(actualIndent>0&&currentRole!=='admin')?'pointer':'default'}">
         <span style="font-size:10px;font-weight:700;color:var(--mut)">📦 Indent</span>
         <span style="font-family:var(--mono);font-size:20px;font-weight:800;color:${indentActual?'var(--acc)':'var(--dim)'}">${indentActual||'—'}</span>
         <span style="font-size:10px;color:var(--dim);font-weight:600">actual</span>
@@ -1416,8 +1416,8 @@ function renderDash() {
       </div>
       ${(currentRole==='transport'||currentRole==='admin')
         ? actualIndent>0 && currentRole!=='admin'
-          ? `<span style="font-size:10px;color:var(--dim);padding:4px 8px">🔒 ${actualIndent} entered</span>`
-          : `<button onclick="checkIndentPrompt()" style="background:transparent;border:none;color:var(--dim);font-size:11px;font-weight:700;cursor:pointer;padding:4px 8px">${actualIndent>0?'✏️ Edit (Admin)':'✏️ Update'}</button>`
+          ? `<span style="font-size:10px;color:var(--dim);padding:4px 8px">🔒 Locked</span>`
+          : `<button onclick="checkIndentPrompt()" style="background:transparent;border:none;color:var(--dim);font-size:11px;font-weight:700;cursor:pointer;padding:4px 8px">✏️ Update</button>`
         : ''
       }
     </div>
