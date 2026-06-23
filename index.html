@@ -1414,13 +1414,11 @@ function renderDash() {
         <span style="font-size:10px;color:var(--dim);font-weight:600">actual</span>
         ${indentPlanned?`<span style="font-size:10px;color:var(--dim)">/ ${indentPlanned} planned</span>`:''}
       </div>
-      ${actualIndent>0
-        ? currentRole==='admin'
-          ? `<button onclick="checkIndentPrompt()" style="background:transparent;border:none;color:var(--dim);font-size:11px;font-weight:700;cursor:pointer;padding:4px 8px">✏️ Edit (Admin)</button>`
-          : `<span style="font-size:10px;color:var(--dim);padding:4px 8px">🔒 Locked</span>`
-        : currentRole==='transport'||currentRole==='admin'
-          ? `<button onclick="checkIndentPrompt()" style="background:transparent;border:none;color:var(--dim);font-size:11px;font-weight:700;cursor:pointer;padding:4px 8px">✏️ Update</button>`
-          : ''
+      ${(currentRole==='transport'||currentRole==='admin')
+        ? actualIndent>0 && currentRole!=='admin'
+          ? `<span style="font-size:10px;color:var(--dim);padding:4px 8px">🔒 ${actualIndent} entered</span>`
+          : `<button onclick="checkIndentPrompt()" style="background:transparent;border:none;color:var(--dim);font-size:11px;font-weight:700;cursor:pointer;padding:4px 8px">${actualIndent>0?'✏️ Edit (Admin)':'✏️ Update'}</button>`
+        : ''
       }
     </div>
     <div style="display:flex;gap:7px;margin-bottom:8px">${bigCard('📋','Today\'s Plan',total,LR(todayRoutes),OSR(todayRoutes),'var(--acc)')}${bigCard('📦','Loaded',loaded.length,L(loaded),OS(loaded),'var(--grn)')}</div>
