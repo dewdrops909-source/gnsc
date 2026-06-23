@@ -1416,7 +1416,14 @@ function renderDash() {
         <span style="font-size:10px;color:var(--dim);font-weight:600">actual</span>
         ${indentPlanned?`<span style="font-size:10px;color:var(--dim)">/ ${indentPlanned} planned</span>`:''}
       </div>
-      ${currentRole==='transport'?`<button onclick="checkIndentPrompt()" style="background:transparent;border:none;color:var(--dim);font-size:11px;font-weight:700;cursor:pointer;padding:4px 8px">✏️ Update</button>`:''}
+      ${actualIndent>0
+        ? currentRole==='admin'
+          ? `<button onclick="checkIndentPrompt()" style="background:transparent;border:none;color:var(--dim);font-size:11px;font-weight:700;cursor:pointer;padding:4px 8px">✏️ Edit (Admin)</button>`
+          : `<span style="font-size:10px;color:var(--dim);padding:4px 8px">🔒 Locked</span>`
+        : currentRole==='transport'||currentRole==='admin'
+          ? `<button onclick="checkIndentPrompt()" style="background:transparent;border:none;color:var(--dim);font-size:11px;font-weight:700;cursor:pointer;padding:4px 8px">✏️ Update</button>`
+          : ''
+      }
     </div>
     <div style="display:flex;gap:7px;margin-bottom:8px">${bigCard('📋','Today\'s Plan',total,LR(todayRoutes),OSR(todayRoutes),'var(--acc)')}${bigCard('📦','Loaded',loaded.length,L(loaded),OS(loaded),'var(--grn)')}</div>
     <div class="prog"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><span style="font-weight:700;font-size:12px">Dispatch Progress</span><span class="pg-time">${pctV}%</span></div><div class="pb"><div class="pf" style="width:${pctV}%"></div></div><div class="pm"><span>${totalV-out.length-broke.length} vehicles remaining</span><span>${out.length}/${totalV} departed</span></div></div>
@@ -2033,15 +2040,17 @@ function delRoute(rid) {
 // ─────────────────────────────────────────────
 function removeFromGNSC(vid) {
   const v=vehicles.find(x=>x.id===vid); if(!v) return;
-  // Revert to planned — vehicle physically left GNSC without dispatch
-  v.status='planned';
-  v.dock='—';
-  // Clear in-GNSC times but keep planned time
-  const kept={planned:v.times?.planned};
-  v.times=kept;
-  const r=vR(v); if(r) r.status='planned';
-  log(v.number,'🚫 Removed from GNSC — back to planned','var(--org)');
-  save(); cMo(); toast(v.number+' removed from GNSC'); renderAll();
+  const r=routes.find(x=>x.vehicleId===vid);
+  const stageMsg = v.status==='dock'?` (was on Dock ${v.dock})`:v.status==='loaded'?` (was Loaded on Dock ${v.dock})`:'';
+  if(!confirm(`Remove ${v.number} from GNSC?${stageMsg}\n\nVehicle entry will be deleted.${r?' Route '+r.routeNo+' will become Short.':''}`)) return;
+  // If linked to a route → make it Short
+  if(r){ r.vehicleId=null; r.status='short'; }
+  // Delete vehicle entry
+  vehicles=vehicles.filter(x=>x.id!==vid);
+  log(v.number,'🗑 Removed from GNSC'+stageMsg+(r?' · '+r.routeNo+' now Short':''),'var(--red)');
+  save(); cMo();
+  toast(v.number+' removed'+(r?' · Route '+r.routeNo+' → Short':'')); 
+  renderAll();
 }
 
 function editEtaMo(vid) {
