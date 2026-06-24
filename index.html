@@ -618,8 +618,8 @@ function sanitize(obj) {
 }
 
 function save(dayKeyOverride) {
-  // actLog: keep last 24 hours only
-  const cutTs=Date.now()-(24*60*60*1000);
+  // actLog: keep last 48 hours so logs survive midnight reset
+  const cutTs=Date.now()-(48*60*60*1000);
   actLog=actLog.filter(a=>!a.ts||a.ts>=cutTs);
   // loadHist & dayHist: keep 30 days for analytics
   const cut30=new Date(); cut30.setDate(cut30.getDate()-30);
@@ -1051,24 +1051,32 @@ async function checkDay() {
   const oldRoutes = [...routes];
   routes = [];
 
-  // ── Step 2: Keep only physically present vehicles (inside/dock/loaded)
-  // planned = never arrived → remove (will become Short if in tomorrow plan)
+  // ── Step 2: Keep physically present vehicles only
   // out = departed → remove
-  // loaded = treat as still inside (may not have synced gate out)
+  // planned = never arrived → remove vehicle (route becomes Short in Step 3)
+  // inside = in GNSC (with or without route) → carry-over
+  // dock/loaded = physically present, always has route → carry-over
+  // breakdown = physically present → carry-over
+  // pool = inside with no route → carry-over
   vehicles = vehicles.filter(v => {
     if(v.status==='out' || v.status==='planned') return false;
-    if(['inside','dock','loaded'].includes(v.status)) {
+    if(['inside','dock','loaded','breakdown'].includes(v.status)) {
       v.isCarryOver=true; v.carryOverDate=last;
       return true;
     }
     return false;
   });
 
-  // ── Step 3: Carry-over routes for physically present vehicles only
+  // ── Step 3: Carry-over all routes (physically present vehicles linked, planned become Short)
   routes = oldRoutes.filter(r => {
     const v=vehicles.find(x=>x.id===r.vehicleId);
-    if(v) { r.isCarryOver=true; r.carryOverDate=last; return true; }
-    return false;
+    if(v) {
+      // Vehicle is physically present — carry-over with vehicle
+      r.isCarryOver=true; r.carryOverDate=last; return true;
+    }
+    // No vehicle (planned never arrived, or short) → carry-over as Short
+    r.vehicleId=null; r.status='short';
+    r.isCarryOver=true; r.carryOverDate=last; return true;
   });
 
   // ── Step 4: Activate tomorrow's plan ──────────────────────────────
