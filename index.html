@@ -1154,7 +1154,13 @@ async function checkDay() {
 }
 
 function autoArchive() {
-  // No auto-archiving — departed vehicles stay until checkDay() removes them at midnight
+  vehicles=vehicles.filter(v=>{
+    if(v.status!=='out') return true;
+    // Carry-over vehicle that departed → remove immediately
+    if(v.isCarryOver) return false;
+    // Same-day departure → keep until midnight (checkDay removes)
+    return true;
+  });
   routes=routes.filter(r=>!r.vehicleId||!!vehicles.find(v=>v.id===r.vehicleId));
 }
 
