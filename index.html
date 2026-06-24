@@ -452,6 +452,15 @@ window.addEventListener('unhandledrejection',e=>{
 // DATA
 // ─────────────────────────────────────────────
 const APP_VER = 10; // increment this with every deploy to force cache busting
+
+// Force re-login if app version changed — ensures all devices run latest code
+const _storedVer = parseInt(localStorage.getItem('gnsc_app_ver')||'0');
+if(_storedVer < APP_VER) {
+  // Clear session — force re-login with new version
+  localStorage.removeItem('gnsc_session');
+  localStorage.setItem('gnsc_app_ver', String(APP_VER));
+  console.log('🔄 App updated to v'+APP_VER+' — re-login required');
+}
 function getToday() {
   // Always use IST (UTC+5:30) regardless of device timezone
   const now = new Date();
