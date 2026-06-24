@@ -1154,21 +1154,7 @@ async function checkDay() {
 }
 
 function autoArchive() {
-  const now=nowMins();
-  vehicles=vehicles.filter(v=>{
-    if(v.status!=='out') return true;
-    const outM=t2m(v.times?.out||'00:00');
-    const elapsed=now>=outM?now-outM:1440-outM+now;
-    // Carry-over departed: always 2hr rule
-    if(v.isCarryOver) return elapsed<120;
-    // Early-activation: vehicle from previous date → 2hr rule
-    if(v.date && v.date<TODAY) return elapsed<120;
-    // Post-midnight departure (before 6am): 2hr rule
-    const isPostMidnight = outM < t2m('06:00');
-    if(isPostMidnight) return elapsed<120;
-    // Normal day departure: keep until midnight (checkDay removes)
-    return true;
-  });
+  // No auto-archiving — departed vehicles stay until checkDay() removes them at midnight
   routes=routes.filter(r=>!r.vehicleId||!!vehicles.find(v=>v.id===r.vehicleId));
 }
 
