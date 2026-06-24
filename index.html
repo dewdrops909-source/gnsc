@@ -451,16 +451,15 @@ window.addEventListener('unhandledrejection',e=>{
 // ─────────────────────────────────────────────
 // DATA
 // ─────────────────────────────────────────────
-const APP_VER = 10; // increment this with every deploy to force cache busting
+const APP_VER = 11; // increment with every deploy
 
-// Force re-login if app version changed — ensures all devices run latest code
+// Force re-login if app version changed
 const _storedVer = parseInt(localStorage.getItem('gnsc_app_ver')||'0');
 if(_storedVer < APP_VER) {
-  // Clear session — force re-login with new version
   localStorage.removeItem('gnsc_session');
   localStorage.setItem('gnsc_app_ver', String(APP_VER));
-  console.log('🔄 App updated to v'+APP_VER+' — re-login required');
 }
+
 function getToday() {
   // Always use IST (UTC+5:30) regardless of device timezone
   const now = new Date();
@@ -1024,6 +1023,24 @@ async function checkDay() {
   }
 
   console.log('checkDay: running reset from', last, '→', TODAY);
+
+  // CRITICAL: Fetch latest data from Firebase before processing
+  // This ensures we use the most up-to-date vehicle statuses
+  // (prevents overwriting gate outs that happened just before midnight)
+  if(typeof db!=='undefined') {
+    try {
+      const snap = await db.ref('gnsc/live').once('value');
+      const fresh = snap.val();
+      if(fresh && fresh.routes && fresh.vehicles) {
+        routes   = fresh.routes   || [];
+        vehicles = fresh.vehicles || [];
+        actLog   = fresh.actLog   || [];
+        dayHist  = fresh.dayHist  || [];
+        console.log('checkDay: loaded fresh Firebase data before reset');
+      }
+    } catch(e) { console.warn('checkDay: could not fetch fresh data', e); }
+  }
+
   snapshotDay(last);
 
   // ── Step 1: Save old routes then clear ──────────────────────────────
@@ -1145,10 +1162,11 @@ function autoArchive() {
 
 function renderCOBan() {
   const el=document.getElementById('coBan'); if(!el) return;
-  const coV  = vehicles.filter(v=>v.isCarryOver&&v.status!=='out');
-  const coOut= vehicles.filter(v=>v.isCarryOver&&v.status==='out');
+  // Only show carry-overs with a route — pool vehicles (no route) excluded from banner
+  const coV  = vehicles.filter(v=>v.isCarryOver&&v.status!=='out'&&v.routeId);
+  const coOut = vehicles.filter(v=>v.isCarryOver&&v.status==='out'&&v.routeId);
   if(!coV.length&&!coOut.length){ el.innerHTML=''; return; }
-  const dates=[...new Set(vehicles.filter(v=>v.isCarryOver).map(v=>v.carryOverDate))].sort().reverse();
+  const dates=[...new Set([...coV,...coOut].map(v=>v.carryOverDate))].sort().reverse();
   el.innerHTML=dates.map(date=>{
     const dv  = coV.filter(v=>v.carryOverDate===date);
     const dOut= coOut.filter(v=>v.carryOverDate===date);
@@ -1166,7 +1184,7 @@ function renderCOBan() {
   }).join('');
 }
 function dismissCO(date) {
-  const pending=vehicles.filter(v=>v.isCarryOver&&v.carryOverDate===date&&v.status!=='out');
+  const pending=vehicles.filter(v=>v.isCarryOver&&v.carryOverDate===date&&v.status!=='out'&&v.routeId);
   if(pending.length){ toast('⚠️ '+pending.length+' still not departed','err'); return; }
   vehicles=vehicles.filter(v=>!(v.isCarryOver&&v.carryOverDate===date));
   routes=routes.filter(r=>!r.isCarryOver||r.carryOverDate!==date);
@@ -1223,7 +1241,15 @@ function sel(role) {
         const hasToday=routes.some(r=>r.date===getToday())||vehicles.some(v=>v.date===getToday());
         if(!hasToday){ TODAY=getToday(); checkDay(); renderCOBan(); renderAll(); }
         else { localStorage.setItem('gnsc_lastday',getToday()); }
-      } 
+      }
+      // Auto logout at 11:59 PM — forces fresh login after midnight
+      // Prevents stale local memory from corrupting midnight reset
+      const now=new Date();
+      const istNow=new Date(now.getTime()+(5.5*60*60*1000));
+      if(istNow.getHours()===23 && istNow.getMinutes()===59 && currentRole) {
+        toast('🌙 Auto logout at 11:59 PM — please re-login after midnight');
+        setTimeout(()=>doLogout(), 3000);
+      }
     },60000);
   }
   // Firebase connection status
