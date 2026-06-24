@@ -688,7 +688,7 @@ function startFirebaseSync() {
       return;
     }
 
-    // GUARD 3: If we already have today's data and incoming has no routes/vehicles, reject
+    // GUARD 4: If we already have today's data and incoming has no routes/vehicles, reject
     // (prevents cleared state from being overwritten by stale push)
     const incomingHasData=(d.routes&&d.routes.length>0)||(d.vehicles&&d.vehicles.length>0);
     const weHaveTodayData=routes.some(r=>r.date===getToday())||vehicles.some(v=>v.date===getToday());
@@ -960,6 +960,10 @@ function markCarryOvers(todayDate) {
   });
   routes.forEach(r=>{
     if(r.date && r.date<todayDate && !r.isCarryOver) {
+      // Only carry over if the vehicle is still physically present (not departed)
+      const v=r.vehicleId?vehicles.find(x=>x.id===r.vehicleId):null;
+      if(v && v.status==='out') return;
+      if(!v && r.status==='out') return;
       r.isCarryOver=true;
       r.carryOverDate=r.date;
       changed=true;
