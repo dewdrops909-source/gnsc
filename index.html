@@ -451,6 +451,7 @@ window.addEventListener('unhandledrejection',e=>{
 // ─────────────────────────────────────────────
 // DATA
 // ─────────────────────────────────────────────
+const APP_VER = 10; // increment this with every deploy to force cache busting
 function getToday() {
   // Always use IST (UTC+5:30) regardless of device timezone
   const now = new Date();
@@ -625,7 +626,7 @@ function save(dayKeyOverride) {
   // Push to Firebase
   if(typeof db!=='undefined') {
     _ignoreNext=true;
-    const payload=sanitize({routes,vehicles,actLog:actLog.slice(-200),dayHist,ts:Date.now(),dayKey:dayKeyOverride||TODAY});
+    const payload=sanitize({routes,vehicles,actLog:actLog.slice(-200),dayHist,ts:Date.now(),dayKey:dayKeyOverride||TODAY,ver:APP_VER});
     db.ref('gnsc/live').set(payload)
       .then(()=>console.log('✅ Firebase push success'))
       .catch(e=>{ console.error('❌ Firebase save error:',e); toast('⚠️ Sync error — check connection','err'); });
@@ -655,20 +656,44 @@ function startFirebaseSync() {
   }
   _fbListening=true;
   // Live data listener
+  let _lastAcceptedTs=0; // track newest data we've accepted
   db.ref('gnsc/live').on('value',snap=>{
     if(_ignoreNext){_ignoreNext=false;return;}
     const d=snap.val(); if(!d) return;
 
-    // PRIMARY GUARD: dayKey tells us which day this data belongs to
+    // GUARD 1: dayKey — reject data from previous days
     if(d.dayKey && d.dayKey < getToday()) {
-      console.log('🚫 Live data is from '+d.dayKey+' — ignoring, today is '+getToday());
-      if(localStorage.getItem('gnsc_lastday') !== getToday()) {
-        localStorage.setItem('gnsc_lastday', d.dayKey);
-      }
+      console.log('🚫 Rejecting stale dayKey:'+d.dayKey+' today:'+getToday());
       return;
     }
 
-    // Accept data — including empty arrays from clearData()
+    // GUARD 2: Version — reject data from older app versions
+    if(d.ver && d.ver < APP_VER) {
+      console.log('🚫 Rejecting old version data ver:'+d.ver+' current:'+APP_VER);
+      return;
+    }
+
+    // GUARD 3: Timestamp — reject data older than what we already have
+    // This prevents old devices from overwriting newer data
+    if(d.ts && d.ts < _lastAcceptedTs) {
+      console.log('🚫 Rejecting older data ts:'+d.ts+' last:'+_lastAcceptedTs);
+      return;
+    }
+
+    // GUARD 3: If we already have today's data and incoming has no routes/vehicles, reject
+    // (prevents cleared state from being overwritten by stale push)
+    const incomingHasData=(d.routes&&d.routes.length>0)||(d.vehicles&&d.vehicles.length>0);
+    const weHaveTodayData=routes.some(r=>r.date===getToday())||vehicles.some(v=>v.date===getToday());
+    if(weHaveTodayData && !incomingHasData && d.dayKey===getToday()) {
+      // Only accept empty if it's a deliberate clear (ts is very recent — within last 30s)
+      const isRecentClear = d.ts && (Date.now()-d.ts) < 30000;
+      if(!isRecentClear) {
+        console.log('🚫 Rejecting empty data — we have today data already');
+        return;
+      }
+    }
+
+    _lastAcceptedTs = d.ts || Date.now();
     routes  =d.routes  ||[];
     vehicles=d.vehicles||[];
     actLog  =d.actLog  ||[];
@@ -756,7 +781,10 @@ function clearMaster(type) {
   renderMasters();
 }
 function clearData() {
-  if(!confirm('Clear all operational data? Masters will be kept.')) return;
+  const vCount=vehicles.length;
+  const rCount=routes.filter(r=>!r.isCarryOver).length;
+  const gateIns=vehicles.filter(v=>v.date===TODAY).length;
+  if(!confirm(`⚠️ CLEAR ALL DATA — FRESH START\n\nThis will permanently delete:\n• ${rCount} routes\n• ${vCount} vehicles (including ${gateIns} today's gate-ins)\n• All activity logs\n\nTo remove only yesterday's carry-overs, use DISMISS × on the orange banner instead.\n\nContinue?`)) return;
   routes=[]; vehicles=[]; actLog=[]; dayHist=[];
   actualIndent=0; tomorrowPlan=[];
   // Clear localStorage
@@ -766,7 +794,7 @@ function clearData() {
   localStorage.setItem('gnsc_lastday', getToday());
   // Push empty state to Firebase with today's dayKey — forces all devices to clear
   if(typeof db!=='undefined') {
-    const emptyPayload={routes:[],vehicles:[],actLog:[],dayHist:[],ts:Date.now(),dayKey:getToday()};
+    const emptyPayload={routes:[],vehicles:[],actLog:[],dayHist:[],ts:Date.now(),dayKey:getToday(),ver:APP_VER};
     db.ref('gnsc/live').set(emptyPayload);
     db.ref('gnsc/daily').update({lastday:getToday(),actualIndent:0,tomorrowPlan:[]});
     db.ref('gnsc/gate_alerts').remove();
@@ -4126,7 +4154,7 @@ function renderMasters() {
         <span id="danger_arr" style="color:var(--dim);font-size:14px">▾</span>
       </div>
       <div id="danger_body" style="display:none;border-top:1px solid var(--red);padding:12px 13px">
-        <button onclick="clearData()" style="width:100%;padding:11px;background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px">🗑 Clear Today's Data — keep masters</button>
+        <button onclick="clearData()" style="width:100%;padding:11px;background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px">🗑 Clear All Data — Fresh Start</button>
         <div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Clear Specific Master</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
           <button onclick="clearMaster('vehicles')" style="padding:9px;background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">🚛 Fleet Master</button>
