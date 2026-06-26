@@ -1075,22 +1075,7 @@ async function startNewDay() {
 
   if(!confirm(msg)) return;
 
-  // Check if reset already successfully completed today (live/dayKey is set by doNewDayReset)
-  // Don't use daily/lastday — that gets set too early by checkDay guards
-  let fbDayKey = null;
-  if(typeof db!=='undefined') {
-    try {
-      const snap = await db.ref('gnsc/live/dayKey').once('value');
-      fbDayKey = snap.val();
-    } catch(e) {}
-  }
-  if(fbDayKey===TODAY) {
-    toast('✅ New day already started — refreshing data');
-    if(currentRole) { renderAll(); updateCutBan(); }
-    return;
-  }
-
-  // Run the reset
+  // Run the reset — transaction inside doNewDayReset handles multi-device protection
   await doNewDayReset();
 }
 
@@ -1194,23 +1179,12 @@ async function doNewDayReset() {
   localStorage.setItem('gnsc_actual_indent','0');
   localStorage.setItem('gnsc_indent_date',TODAY);
 
-  // Step 6: Firebase transaction — only one device wins
-  let writeSuccess=false;
+  // Step 6: Save dayKey to Firebase — manual reset always wins
+  let writeSuccess=true;
   if(typeof db!=='undefined') {
     try {
-      const result=await db.ref('gnsc/live/dayKey').transaction(cur=>{
-        if(cur===TODAY) return; // abort — another device already reset
-        return TODAY;
-      });
-      writeSuccess=result.committed;
-    } catch(e) { writeSuccess=true; } // offline fallback
-  } else { writeSuccess=true; }
-
-  if(!writeSuccess) {
-    // Another device won — sync from Firebase instead
-    toast('✅ New day already started by another device — syncing');
-    localStorage.setItem('gnsc_lastday', TODAY);
-    return;
+      await db.ref('gnsc/live/dayKey').set(TODAY);
+    } catch(e) { console.warn('doNewDayReset: dayKey set failed', e); }
   }
 
   // Step 7: Save and sync
