@@ -467,6 +467,7 @@ function getToday() {
   return ist.toISOString().slice(0,10);
 }
 let TODAY = getToday();
+let RESET_TS = parseInt(localStorage.getItem('gnsc_reset_ts')||'0'); // timestamp of last Start New Day
 
 let routes         = JSON.parse(localStorage.getItem('gnsc_routes')    || '[]');
 let vehicles       = JSON.parse(localStorage.getItem('gnsc_vehicles')  || '[]');
@@ -634,7 +635,7 @@ function save(dayKeyOverride) {
   // Push to Firebase
   if(typeof db!=='undefined') {
     _ignoreNext=true;
-    const payload=sanitize({routes,vehicles,actLog:actLog.slice(-200),dayHist,ts:Date.now(),dayKey:dayKeyOverride||TODAY,ver:APP_VER});
+    const payload=sanitize({routes,vehicles,actLog:actLog.slice(-200),dayHist,loadHist,ts:Date.now(),dayKey:dayKeyOverride||TODAY,ver:APP_VER,resetTs:RESET_TS});
     db.ref('gnsc/live').set(payload)
       .then(()=>console.log('✅ Firebase push success'))
       .catch(e=>{ console.error('❌ Firebase save error:',e); toast('⚠️ Sync error — check connection','err'); });
@@ -669,10 +670,10 @@ function startFirebaseSync() {
     if(_ignoreNext){_ignoreNext=false;return;}
     const d=snap.val(); if(!d) return;
 
-    // GUARD 1: dayKey — reject data from previous days
-    if(d.dayKey && d.dayKey < getToday()) {
-      console.log('🚫 Rejecting stale dayKey:'+d.dayKey+' today:'+getToday());
-      return;
+    // GUARD 1: sync resetTs from incoming data — always update if newer
+    if(d.resetTs && d.resetTs > RESET_TS) {
+      RESET_TS = d.resetTs;
+      localStorage.setItem('gnsc_reset_ts', String(RESET_TS));
     }
 
     // GUARD 2: Version — reject data from older app versions
@@ -688,17 +689,12 @@ function startFirebaseSync() {
       return;
     }
 
-    // GUARD 4: If we already have today's data and incoming has no routes/vehicles, reject
-    // (prevents cleared state from being overwritten by stale push)
+    // GUARD 4: Only accept empty data if it's a deliberate clearData() call
+    // Never accept empty from doNewDayReset — that would wipe all devices
     const incomingHasData=(d.routes&&d.routes.length>0)||(d.vehicles&&d.vehicles.length>0);
-    const weHaveTodayData=routes.some(r=>r.date===getToday())||vehicles.some(v=>v.date===getToday());
-    if(weHaveTodayData && !incomingHasData && d.dayKey===getToday()) {
-      // Only accept empty if it's a deliberate clear (ts is very recent — within last 30s)
-      const isRecentClear = d.ts && (Date.now()-d.ts) < 30000;
-      if(!isRecentClear) {
-        console.log('🚫 Rejecting empty data — we have today data already');
-        return;
-      }
+    if(!incomingHasData && !d.deliberateClear) {
+      console.log('🚫 Rejecting empty data — not a deliberate clear');
+      return;
     }
 
     _lastAcceptedTs = d.ts || Date.now();
@@ -706,6 +702,7 @@ function startFirebaseSync() {
     vehicles=d.vehicles||[];
     actLog  =d.actLog  ||[];
     dayHist =d.dayHist ||[];
+    if(d.loadHist && d.loadHist.length) { loadHist=d.loadHist; localStorage.setItem('gnsc_loadhist',JSON.stringify(loadHist)); }
     localStorage.setItem('gnsc_routes',   JSON.stringify(routes));
     localStorage.setItem('gnsc_vehicles', JSON.stringify(vehicles));
     localStorage.setItem('gnsc_actlog',   JSON.stringify(actLog));
@@ -738,6 +735,12 @@ function startFirebaseSync() {
         localStorage.setItem('gnsc_lastday', d.lastday);
         console.log('checkDay: lastday synced from Firebase →', d.lastday);
       }
+    }
+    // Sync resetTs — always use the latest value
+    if(d.resetTs && d.resetTs > RESET_TS) {
+      RESET_TS = d.resetTs;
+      localStorage.setItem('gnsc_reset_ts', String(RESET_TS));
+      console.log('resetTs synced from Firebase daily →', RESET_TS);
     }
     if(d.actualIndent!==undefined){
       actualIndent=parseInt(d.actualIndent)||0;
@@ -806,7 +809,7 @@ function clearData() {
   localStorage.setItem('gnsc_lastday', getToday());
   // Push empty state to Firebase with today's dayKey — forces all devices to clear
   if(typeof db!=='undefined') {
-    const emptyPayload={routes:[],vehicles:[],actLog:[],dayHist:[],ts:Date.now(),dayKey:getToday(),ver:APP_VER};
+    const emptyPayload={routes:[],vehicles:[],actLog:[],dayHist:[],ts:Date.now(),dayKey:getToday(),ver:APP_VER,deliberateClear:true};
     db.ref('gnsc/live').set(emptyPayload);
     db.ref('gnsc/daily').update({lastday:getToday(),actualIndent:0,tomorrowPlan:[]});
     db.ref('gnsc/gate_alerts').remove();
@@ -931,6 +934,7 @@ function updateStatus(vid, newStatus) {
     const msgs={inside:'🚛 Gate IN',dock:'🔋 At Dock',loaded:'📦 Loaded',out:'✅ Gate OUT'};
     log(v.number, msgs[newStatus]||newStatus, SC[newStatus]);
   }
+  if(newStatus==='out') autoArchive(); // remove pendency immediately on departure
   save(); cMo(); toast(v.number+' → '+SL[newStatus]); renderAll(); updateCutBan();
 }
 
@@ -952,24 +956,34 @@ function snapshotDay(date) {
 }
 
 function markCarryOvers(todayDate) {
-  // Mark any vehicles/routes from a previous date as carry-over (YDAY flag)
-  // without resetting or clearing anything
+  // Use resetTs if available — more reliable than date for peak day operations
+  // resetTs is set when "Start New Day" runs — anything created before it is old
+  const useTs = RESET_TS > 0;
   let changed=false;
   vehicles.forEach(v=>{
-    if(v.date && v.date<todayDate && !v.isCarryOver && v.status!=='out') {
+    if(v.isCarryOver) return; // already flagged
+    if(v.status==='out') return; // departed — not a carry-over
+    if(v.status==='inside' && !v.routeId) return; // pool vehicle — no YDAY flag
+    const isOld = useTs
+      ? (v.createdAt ? v.createdAt < RESET_TS : (v.date && v.date < todayDate))  // use createdAt if available, else date
+      : (v.date && v.date < todayDate);
+    if(isOld) {
       v.isCarryOver=true;
-      v.carryOverDate=v.date;
+      v.carryOverDate=v.date||todayDate;
       changed=true;
     }
   });
   routes.forEach(r=>{
-    if(r.date && r.date<todayDate && !r.isCarryOver) {
-      // Only carry over if the vehicle is still physically present (not departed)
-      const v=r.vehicleId?vehicles.find(x=>x.id===r.vehicleId):null;
-      if(v && v.status==='out') return;
-      if(!v && r.status==='out') return;
+    if(r.isCarryOver) return; // already flagged
+    const v=r.vehicleId?vehicles.find(x=>x.id===r.vehicleId):null;
+    if(v && v.status==='out') return; // vehicle departed
+    if(!v && r.status==='out') return;
+    const isOld = useTs
+      ? (r.createdAt ? r.createdAt < RESET_TS : (r.date && r.date < todayDate))
+      : (r.date && r.date < todayDate);
+    if(isOld) {
       r.isCarryOver=true;
-      r.carryOverDate=r.date;
+      r.carryOverDate=r.date||todayDate;
       changed=true;
     }
   });
@@ -1075,40 +1089,56 @@ async function startNewDay() {
 
   if(!confirm(msg)) return;
 
-  // Run the reset — transaction inside doNewDayReset handles multi-device protection
+  // Guard: second press within 12 hours — admin only
+  const lastResetTs = parseInt(localStorage.getItem('gnsc_reset_ts')||'0');
+  const hoursSinceReset = lastResetTs ? (Date.now()-lastResetTs)/(1000*60*60) : 99;
+  if(hoursSinceReset < 12) {
+    if(currentUser?.role !== 'admin') {
+      toast('⚠️ Start New Day already pressed — only admin can run again within 12 hours','err');
+      return;
+    }
+    if(!confirm(`⚠️ Admin Override — Start New Day was already pressed ${Math.round(hoursSinceReset*10)/10}h ago.
+
+Running again will re-process current data.
+
+Continue?`)) return;
+  }
+
+  // Run the reset
   await doNewDayReset();
 }
 
 async function doNewDayReset() {
   TODAY = getToday();
   const last = localStorage.getItem('gnsc_lastday') || TODAY;
-
-  // Step 0: Fetch freshest data from Firebase (live + daily)
+  // Step 0: Only fetch tomorrowPlan from Firebase daily
+  // Do NOT fetch live data — use current in-memory state which is already live and correct
+  // Fetching from Firebase risks pulling stale data and overwriting current clean state
   if(typeof db!=='undefined') {
     try {
-      const [liveSnap, dailySnap] = await Promise.all([
-        db.ref('gnsc/live').once('value'),
-        db.ref('gnsc/daily').once('value')
-      ]);
-      const fresh = liveSnap.val();
-      if(fresh && fresh.routes && fresh.vehicles) {
-        routes=fresh.routes||[]; vehicles=fresh.vehicles||[];
-        actLog=fresh.actLog||[]; dayHist=fresh.dayHist||[];
-        console.log('doNewDayReset: fresh live data loaded');
-      }
+      const dailySnap = await db.ref('gnsc/daily').once('value');
       const daily = dailySnap.val();
       if(daily && daily.tomorrowPlan && daily.tomorrowPlan.length) {
         tomorrowPlan=daily.tomorrowPlan;
         console.log('doNewDayReset: tomorrow plan loaded —', tomorrowPlan.length, 'routes');
       }
-    } catch(e) { console.warn('doNewDayReset: fetch failed', e); }
+    } catch(e) { console.warn('doNewDayReset: daily fetch failed', e); }
   }
 
   snapshotDay(last);
 
   // Track departed + planned vehicle IDs before removing
+  // Only remove planned vehicles that are OLD (created before last reset)
+  // Today's new planned vehicles (createdAt >= RESET_TS) should be kept
+  const prevResetTs = RESET_TS; // capture before updating
   const departedVids = new Set(vehicles.filter(v=>v.status==='out').map(v=>v.id));
-  const plannedVids  = new Set(vehicles.filter(v=>v.status==='planned').map(v=>v.id));
+  const plannedVids  = new Set(vehicles.filter(v=>{
+    if(v.status!=='planned') return false;
+    // If no createdAt, use date comparison
+    if(!v.createdAt) return v.date && v.date < TODAY;
+    // Only remove planned vehicles from before last reset
+    return v.createdAt < prevResetTs || prevResetTs === 0;
+  }).map(v=>v.id));
 
   // Step 1: Save old routes
   const oldRoutes = [...routes];
@@ -1116,11 +1146,13 @@ async function doNewDayReset() {
 
   // Step 2: Filter vehicles
   // out      → remove
-  // planned  → remove (route becomes Short in Step 3)
-  // inside WITH route (dock/loaded/breakdown) → carry-over with YDAY
+  // planned (old, before last reset) → remove (route becomes Short in Step 3)
+  // planned (new, after last reset) → keep
+  // inside WITH route → carry-over with YDAY
   // inside NO route (pool) → keep as-is, NO YDAY flag, not in banner
   vehicles = vehicles.filter(v => {
-    if(v.status==='out' || v.status==='planned') return false;
+    if(v.status==='out') return false;
+    if(v.status==='planned' && plannedVids.has(v.id)) return false; // old planned → remove
     if(v.status==='inside' && !v.routeId) {
       // Pool vehicle — keep but no carry-over flag
       return true;
@@ -1154,18 +1186,19 @@ async function doNewDayReset() {
   if(tomorrowPlan.length) {
     tomorrowPlan.forEach(p=>{
       const rId=genRId();
-      const route={id:rId,routeNo:p.routeNo,city:p.city,stores:p.stores,destType:p.destType,eta:p.eta,notes:'',vehicleId:null,status:'short',date:TODAY};
+      const route={id:rId,routeNo:p.routeNo,city:p.city,stores:p.stores,destType:p.destType,eta:p.eta,notes:'',vehicleId:null,status:'short',date:TODAY,createdAt:RESET_TS};
       routes.push(route); ra++;
       if(p.vehicleNo) {
         if(busyNumbers.has(p.vehicleNo)) { skipped.push(p.vehicleNo); return; }
         const m=masterLookup(p.vehicleNo);
         const poolV=vehicles.find(v=>v.number===p.vehicleNo&&v.status==='inside'&&!v.routeId);
         if(poolV) {
-          poolV.routeId=rId; poolV.isCarryOver=true; poolV.carryOverDate=last;
+          poolV.routeId=rId;
+          // Pool vehicle joins today's plan — NOT a carry-over
           route.vehicleId=poolV.id; route.status=poolV.status; va++;
         } else {
           const vId=genId();
-          const veh={id:vId,number:p.vehicleNo,type:p.type||(m?.type||'24ft'),vendor:p.vendor!=='—'?p.vendor:(m?.vendor||'—'),dock:'—',routeId:rId,status:'planned',times:{planned:'00:00'},date:TODAY,eta:p.eta};
+          const veh={id:vId,number:p.vehicleNo,type:p.type||(m?.type||'24ft'),vendor:p.vendor!=='—'?p.vendor:(m?.vendor||'—'),dock:'—',routeId:rId,status:'planned',times:{planned:'00:00'},date:TODAY,eta:p.eta,createdAt:RESET_TS};
           vehicles.push(veh); route.vehicleId=vId; route.status='planned'; va++;
         }
       }
@@ -1179,18 +1212,28 @@ async function doNewDayReset() {
   localStorage.setItem('gnsc_actual_indent','0');
   localStorage.setItem('gnsc_indent_date',TODAY);
 
-  // Step 6: Save dayKey to Firebase — manual reset always wins
-  let writeSuccess=true;
+  // Step 6: Set RESET_TS now — after processing
+  RESET_TS = Date.now();
+  localStorage.setItem('gnsc_reset_ts', String(RESET_TS));
+  // Stamp all non-carry-over routes and vehicles with new RESET_TS
+  // This includes pool vehicles that were assigned to today's plan
+  routes.forEach(r=>{ if(!r.isCarryOver) r.createdAt=RESET_TS; });
+  vehicles.forEach(v=>{ if(!v.isCarryOver) v.createdAt=RESET_TS; });
+  // Also stamp pool vehicles that just got assigned to a route (they're now part of today's plan)
+  vehicles.forEach(v=>{ if(v.routeId && !v.isCarryOver) v.createdAt=RESET_TS; });
+
+  // Save dayKey + resetTs to Firebase
   if(typeof db!=='undefined') {
     try {
       await db.ref('gnsc/live/dayKey').set(TODAY);
+      await db.ref('gnsc/live/resetTs').set(RESET_TS);
     } catch(e) { console.warn('doNewDayReset: dayKey set failed', e); }
   }
 
   // Step 7: Save and sync
   save();
   if(typeof db!=='undefined') {
-    db.ref('gnsc/daily').update({lastday:TODAY,actualIndent:0,tomorrowPlan:[]}).catch(e=>console.warn(e));
+    db.ref('gnsc/daily').update({lastday:TODAY,actualIndent:0,tomorrowPlan:[],resetTs:RESET_TS}).catch(e=>console.warn(e));
   }
   localStorage.setItem('gnsc_lastday', TODAY);
 
@@ -1214,28 +1257,31 @@ function autoArchive() {
     // Same-day departure → keep until midnight (checkDay removes)
     return true;
   });
-  routes=routes.filter(r=>!r.vehicleId||!!vehicles.find(v=>v.id===r.vehicleId));
+  routes=routes.filter(r=>{
+    // Remove carry-over routes that have departed
+    if(r.isCarryOver && r.status==='out') return false;
+    // Remove routes whose vehicle has been removed
+    if(r.vehicleId && !vehicles.find(v=>v.id===r.vehicleId)) return false;
+    return true;
+  });
 }
 
 function renderCOBan() {
   const el=document.getElementById('coBan'); if(!el) return;
-  // Only show carry-overs with a route — pool vehicles (no route) excluded from banner
-  const coV  = vehicles.filter(v=>v.isCarryOver&&v.status!=='out'&&v.routeId);
-  const coOut = vehicles.filter(v=>v.isCarryOver&&v.status==='out'&&v.routeId);
-  if(!coV.length&&!coOut.length){ el.innerHTML=''; return; }
-  const dates=[...new Set([...coV,...coOut].map(v=>v.carryOverDate))].sort().reverse();
+  // Only show carry-overs with a route that are NOT departed — pool excluded
+  const coV = vehicles.filter(v=>v.isCarryOver&&v.status!=='out'&&v.routeId);
+  if(!coV.length){ el.innerHTML=''; return; }
+  const dates=[...new Set(coV.map(v=>v.carryOverDate))].sort().reverse();
   el.innerHTML=dates.map(date=>{
-    const dv  = coV.filter(v=>v.carryOverDate===date);
-    const dOut= coOut.filter(v=>v.carryOverDate===date);
-    if(!dv.length&&!dOut.length) return '';
+    const dv = coV.filter(v=>v.carryOverDate===date);
+    if(!dv.length) return '';
     return `<div class="co-ban">
       <div class="co-title">
-        <span>🔄 From ${esc(date)} — ${dv.length} pending${dOut.length?' · '+dOut.length+' recently out':''}</span>
+        <span>🔄 From ${esc(date)} — ${dv.length} pending</span>
         <span onclick="dismissCO('${date}')" style="cursor:pointer;font-size:11px;opacity:.7;font-weight:600">Dismiss ×</span>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:5px">
         ${dv.map(v=>{const r=vR(v);return `<div class="co-chip" onclick="openVMo('${v.id}')"><span class="cc-n">${esc(v.number)}</span><span class="cc-s">${r?esc(r.routeNo)+' · '+esc(r.city):'—'} · ${SI[v.status]} ${SL[v.status]}</span></div>`;}).join('')}
-        ${dOut.map(v=>`<div class="co-chip" style="opacity:.5;border-style:dashed"><span class="cc-n">${esc(v.number)}</span><span class="cc-s">✅ Out ${v.times?.out||'—'}</span></div>`).join('')}
       </div>
     </div>`;
   }).join('');
@@ -2070,7 +2116,7 @@ function doAssignNew(rid) {
   if(!validVNum(num)){ toast('⚠️ Invalid format — e.g. MH04AB1234 or MH04A1234','err'); return; }
   if(vehicles.find(v=>v.number===num&&v.status!=='out')){ toast('⚠️ Vehicle already active','err'); return; }
   const m=masterLookup(num);
-  const v={id:genId(),number:num,type:m?.type||'24ft',vendor:vnd!=='—'?vnd:(m?.vendor||'—'),dock:'—',routeId:null,status:'planned',times:{planned:nowTime()},date:TODAY};
+  const v={id:genId(),number:num,type:m?.type||'24ft',vendor:vnd!=='—'?vnd:(m?.vendor||'—'),dock:'—',routeId:null,status:'planned',times:{planned:nowTime()},date:TODAY,createdAt:Date.now()};
   vehicles.push(v); link(v.id,rid); masterUpsert(num,v.vendor,v.type);
   log(num,'➕ New → '+r.routeNo,'var(--blu)');
   save(); cMo(); toast(num+' → '+r.city); renderAll();
@@ -2159,7 +2205,7 @@ function doSplit(rid) {
   const nr=(document.getElementById('srno')?.value||'').trim()||r.routeNo+'-B';
   const ns=sel.map(i=>r.stores[i]);
   r.stores=r.stores.filter((_,i)=>!sel.includes(i));
-  routes.push({id:genRId(),routeNo:nr,city:nc,stores:ns,destType:r.destType,eta:r.eta,notes:r.notes,vehicleId:null,status:'short',date:TODAY});
+  routes.push({id:genRId(),routeNo:nr,city:nc,stores:ns,destType:r.destType,eta:r.eta,notes:r.notes,vehicleId:null,status:'short',date:TODAY,createdAt:Date.now()});
   log(r.routeNo,'✂️ Split → '+nr,'var(--pur)');
   save(); cMo(); toast('Split → '+nr); renderRoutes();
 }
@@ -3185,7 +3231,7 @@ function gClear() { const i=document.getElementById('gSrch');if(i)i.value=''; co
 function gAddKnown(num, vendor, type) {
   // Known vehicle (in master), not in today's plan — inward as pool, alert transport
   if(vehicles.find(v=>v.number===num&&v.status!=='out')){ toast('Already inwarded'); return; }
-  const v={id:genId(),number:num,type:type||'24ft',vendor:vendor||'—',dock:'—',routeId:null,status:'inside',times:{planned:nowTime(),inside:nowTime()},date:TODAY,isUnplanned:true};
+  const v={id:genId(),number:num,type:type||'24ft',vendor:vendor||'—',dock:'—',routeId:null,status:'inside',times:{planned:nowTime(),inside:nowTime()},date:TODAY,isUnplanned:true,createdAt:Date.now()};
   vehicles.push(v);
   log(num,'🚛 Inwarded (not in plan) · transport alerted','var(--org)');
   save(); toast('⚠️ '+num+' inwarded · transport alerted'); gClear(); renderAll();
@@ -3193,7 +3239,7 @@ function gAddKnown(num, vendor, type) {
 function gAddUnknown(num) {
   // Not in master — inward with incomplete details, transport must complete master
   if(vehicles.find(v=>v.number===num&&v.status!=='out')){ toast('Already inwarded'); return; }
-  const v={id:genId(),number:num,type:'—',vendor:'—',dock:'—',routeId:null,status:'inside',times:{planned:nowTime(),inside:nowTime()},date:TODAY,isUnplanned:true,masterIncomplete:true};
+  const v={id:genId(),number:num,type:'—',vendor:'—',dock:'—',routeId:null,status:'inside',times:{planned:nowTime(),inside:nowTime()},date:TODAY,isUnplanned:true,masterIncomplete:true,createdAt:Date.now()};
   vehicles.push(v);
   // Add skeleton to master so transport can fill in details
   if(!masterLookup(num)) masterVehicles.push({number:num,vendor:'—',type:'—',incomplete:true});
@@ -3342,7 +3388,7 @@ function addVehicle() {
   const finalVnd=existing?.vendor!=='—'?existing.vendor:vnd;
   const finalType=existing?.type!=='—'?existing.type:type;
 
-  const v={id:genId(),number:num,type:finalType,vendor:finalVnd,dock:'—',routeId:null,status:addArrival,times:{planned:nowTime()},date:TODAY,eta};
+  const v={id:genId(),number:num,type:finalType,vendor:finalVnd,dock:'—',routeId:null,status:addArrival,times:{planned:nowTime()},date:TODAY,eta,createdAt:Date.now()};
   if(addArrival==='inside') v.times.inside=nowTime();
   vehicles.push(v);
 
@@ -3401,11 +3447,11 @@ function addRoute() {
     }
   }
 
-  const r={id:genRId(),routeNo:rNo,city,stores:storeList,destType,eta,notes,vehicleId:null,status:'short',date:TODAY};
+  const r={id:genRId(),routeNo:rNo,city,stores:storeList,destType,eta,notes,vehicleId:null,status:'short',date:TODAY,createdAt:Date.now()};
   routes.push(r);
   if(vNum) {
     let v=vehicles.find(x=>x.number===vNum&&x.status!=='out');
-    if(!v){ const m=masterLookup(vNum); v={id:genId(),number:vNum,type:m?.type||'24ft',vendor:m?.vendor||'—',dock:'—',routeId:null,status:'planned',times:{planned:nowTime()},date:TODAY,eta}; vehicles.push(v); }
+    if(!v){ const m=masterLookup(vNum); v={id:genId(),number:vNum,type:m?.type||'24ft',vendor:m?.vendor||'—',dock:'—',routeId:null,status:'planned',times:{planned:nowTime()},date:TODAY,eta,createdAt:Date.now()}; vehicles.push(v); }
     link(v.id,r.id);
     log(rNo,'📍 Route added · '+vNum+' assigned','var(--acc)');
   } else { log(rNo,'📍 Route added (short) · '+city,'var(--org)'); }
@@ -3883,7 +3929,7 @@ function activateTomorrowNow() {
         poolV.routeId=rId; route.vehicleId=poolV.id; route.status=poolV.status; va++;
       } else if(!existingVNums.has(p.vehicleNo)) {
         const vId=genId();
-        const veh={id:vId,number:p.vehicleNo,type:m?.type||'24ft',vendor:m?.vendor||'—',dock:'—',routeId:rId,status:'planned',times:{planned:nowTime()},date:nextDate,eta:p.eta||'17:00'};
+        const veh={id:vId,number:p.vehicleNo,type:m?.type||'24ft',vendor:m?.vendor||'—',dock:'—',routeId:rId,status:'planned',times:{planned:nowTime()},date:nextDate,eta:p.eta||'17:00',createdAt:Date.now()};
         vehicles.push(veh); route.vehicleId=vId; route.status='planned'; va++;
       } else {
         skipped.push(p.vehicleNo);
@@ -3981,7 +4027,7 @@ function bulkUpload(append=false) {
 
     // Create route
     const rId=genRId();
-    const route={id:rId,routeNo:p.routeNo,city:p.city,stores:p.stores,destType:p.destType,eta:p.eta,notes:'',vehicleId:null,status:'short',date:TODAY};
+    const route={id:rId,routeNo:p.routeNo,city:p.city,stores:p.stores,destType:p.destType,eta:p.eta,notes:'',vehicleId:null,status:'short',date:TODAY,createdAt:Date.now()};
     routes.push(route);
     ra++;
 
@@ -4023,7 +4069,7 @@ function bulkUpload(append=false) {
         if(!validVNum(p.vehicleNo)){ conflicts.push({rNo:p.routeNo,vNo:p.vehicleNo,reason:'invalid vehicle number format'}); }
         const vId=genId();
         const m=masterLookup(p.vehicleNo);
-        const veh={id:vId,number:p.vehicleNo,type:p.type||(m?.type||'24ft'),vendor:p.vendor!=='—'?p.vendor:(m?.vendor||'—'),dock:'—',routeId:rId,status:'planned',times:{planned:nowTime()},date:TODAY,eta:p.eta};
+        const veh={id:vId,number:p.vehicleNo,type:p.type||(m?.type||'24ft'),vendor:p.vendor!=='—'?p.vendor:(m?.vendor||'—'),dock:'—',routeId:rId,status:'planned',times:{planned:nowTime()},date:TODAY,eta:p.eta,createdAt:Date.now()};
         vehicles.push(veh);
         masterUpsert(veh.number,veh.vendor,veh.type);
         va++;
