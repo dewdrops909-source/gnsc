@@ -634,6 +634,12 @@ function save(dayKeyOverride) {
   localStorage.setItem('gnsc_docks',    JSON.stringify(DOCKS));
   // Push to Firebase
   if(typeof db!=='undefined') {
+    // Safety check — never push empty data unless explicitly cleared via clearData()
+    // This prevents accidental Firebase wipes from reset bugs
+    if(routes.length===0 && vehicles.length===0) {
+      console.warn('save() blocked — routes and vehicles both empty. Use clearData() to intentionally clear.');
+      return;
+    }
     _ignoreNext=true;
     const payload=sanitize({routes,vehicles,actLog:actLog.slice(-200),dayHist,loadHist,ts:Date.now(),dayKey:dayKeyOverride||TODAY,ver:APP_VER,resetTs:RESET_TS});
     db.ref('gnsc/live').set(payload)
@@ -641,6 +647,21 @@ function save(dayKeyOverride) {
       .catch(e=>{ console.error('❌ Firebase save error:',e); toast('⚠️ Sync error — check connection','err'); });
   }
 }
+function forcePushToFirebase() {
+  if(typeof db==='undefined') { toast('Firebase not connected','err'); return; }
+  if(!confirm('Force push all local data to Firebase?\n\nThis will overwrite Firebase with what is currently on this device.')) return;
+  const payload = {
+    routes, vehicles, actLog, dayHist, loadHist,
+    ts: Date.now(),
+    dayKey: TODAY||getToday(),
+    ver: APP_VER,
+    resetTs: RESET_TS
+  };
+  db.ref('gnsc/live').set(payload)
+    .then(()=>{ toast('✅ Force push successful — Firebase updated'); })
+    .catch(e=>{ toast('❌ Push failed: '+e.message,'err'); });
+}
+
 function saveMasters() {
   localStorage.setItem('gnsc_master',   JSON.stringify(masterVehicles));
   localStorage.setItem('gnsc_mstores',  JSON.stringify(masterStores));
@@ -4196,6 +4217,7 @@ function renderMasters() {
         <span id="danger_arr" style="color:var(--dim);font-size:14px">▾</span>
       </div>
       <div id="danger_body" style="display:none;border-top:1px solid var(--red);padding:12px 13px">
+        <button onclick="forcePushToFirebase()" style="width:100%;padding:12px;background:rgba(0,120,255,.15);border:1px solid #0078ff;color:#0078ff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px">📤 Force Push to Firebase</button>
         <button onclick="clearData()" style="width:100%;padding:11px;background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px">🗑 Clear All Data — Fresh Start</button>
         <div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Clear Specific Master</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
