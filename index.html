@@ -1044,65 +1044,127 @@ async function checkDay() {
     return;
   }
 
-  console.log('checkDay: running reset from', last, '→', TODAY);
+  // Auto reset DISABLED — transport must press 'Start New Day' in Plan tab
+  // Prevents midnight race conditions and stale data corruption
+  console.log('checkDay: new day detected — waiting for manual Start New Day');
+  markCarryOvers(TODAY); // just flag YDAY, no reset
+}
 
-  // CRITICAL: Fetch latest data from Firebase before processing
-  // This ensures we use the most up-to-date vehicle statuses
-  // (prevents overwriting gate outs that happened just before midnight)
+// ─────────────────────────────────────────────
+// MANUAL NEW DAY — triggered by admin/transport button
+// ─────────────────────────────────────────────
+async function startNewDay() {
+  TODAY = getToday();
+
+  // Confirm dialog showing what will happen
+  const coOut  = vehicles.filter(v=>v.status==='out');
+  const coP    = vehicles.filter(v=>v.status==='planned');
+  const coGNSC = vehicles.filter(v=>['inside','dock','loaded','breakdown'].includes(v.status)&&v.routeId);
+  const pool   = vehicles.filter(v=>v.status==='inside'&&!v.routeId);
+
+  const msg = `🌅 Start New Day — ${TODAY}\n\n`
+    + `Will be removed:\n`
+    + `• ${coOut.length} departed vehicle${coOut.length!==1?'s':''}\n`
+    + `• ${coP.length} planned (never arrived) — route becomes Short\n\n`
+    + `Will carry over (YDAY):\n`
+    + `• ${coGNSC.length} vehicle${coGNSC.length!==1?'s':''} still in GNSC\n\n`
+    + `Pool (no change):\n`
+    + `• ${pool.length} pool vehicle${pool.length!==1?'s':''} (inside, no route)\n\n`
+    + (tomorrowPlan.length ? `Tomorrow's plan: ${tomorrowPlan.length} routes will activate.\n\n` : '')
+    + `Continue?`;
+
+  if(!confirm(msg)) return;
+
+  // Check if already done today
+  let fbLastday = null;
   if(typeof db!=='undefined') {
     try {
-      const snap = await db.ref('gnsc/live').once('value');
-      const fresh = snap.val();
+      const snap = await db.ref('gnsc/daily/lastday').once('value');
+      fbLastday = snap.val();
+    } catch(e) {}
+  }
+  if(fbLastday===TODAY) {
+    toast('✅ New day already started — refreshing data');
+    if(currentRole) { renderAll(); updateCutBan(); }
+    return;
+  }
+
+  // Run the reset
+  await doNewDayReset();
+}
+
+async function doNewDayReset() {
+  TODAY = getToday();
+  const last = localStorage.getItem('gnsc_lastday') || TODAY;
+
+  // Step 0: Fetch freshest data from Firebase (live + daily)
+  if(typeof db!=='undefined') {
+    try {
+      const [liveSnap, dailySnap] = await Promise.all([
+        db.ref('gnsc/live').once('value'),
+        db.ref('gnsc/daily').once('value')
+      ]);
+      const fresh = liveSnap.val();
       if(fresh && fresh.routes && fresh.vehicles) {
-        routes   = fresh.routes   || [];
-        vehicles = fresh.vehicles || [];
-        actLog   = fresh.actLog   || [];
-        dayHist  = fresh.dayHist  || [];
-        console.log('checkDay: loaded fresh Firebase data before reset');
+        routes=fresh.routes||[]; vehicles=fresh.vehicles||[];
+        actLog=fresh.actLog||[]; dayHist=fresh.dayHist||[];
+        console.log('doNewDayReset: fresh live data loaded');
       }
-    } catch(e) { console.warn('checkDay: could not fetch fresh data', e); }
+      const daily = dailySnap.val();
+      if(daily && daily.tomorrowPlan && daily.tomorrowPlan.length) {
+        tomorrowPlan=daily.tomorrowPlan;
+        console.log('doNewDayReset: tomorrow plan loaded —', tomorrowPlan.length, 'routes');
+      }
+    } catch(e) { console.warn('doNewDayReset: fetch failed', e); }
   }
 
   snapshotDay(last);
 
-  // ── Step 1: Save old routes then clear ──────────────────────────────
+  // Track departed + planned vehicle IDs before removing
+  const departedVids = new Set(vehicles.filter(v=>v.status==='out').map(v=>v.id));
+  const plannedVids  = new Set(vehicles.filter(v=>v.status==='planned').map(v=>v.id));
+
+  // Step 1: Save old routes
   const oldRoutes = [...routes];
   routes = [];
 
-  // ── Step 2: Keep physically present vehicles only
-  // out = departed → remove
-  // planned = never arrived → remove vehicle (route becomes Short in Step 3)
-  // inside = in GNSC (with or without route) → carry-over
-  // dock/loaded = physically present, always has route → carry-over
-  // breakdown = physically present → carry-over
-  // pool = inside with no route → carry-over
+  // Step 2: Filter vehicles
+  // out      → remove
+  // planned  → remove (route becomes Short in Step 3)
+  // inside WITH route (dock/loaded/breakdown) → carry-over with YDAY
+  // inside NO route (pool) → keep as-is, NO YDAY flag, not in banner
   vehicles = vehicles.filter(v => {
     if(v.status==='out' || v.status==='planned') return false;
-    if(['inside','dock','loaded','breakdown'].includes(v.status)) {
+    if(v.status==='inside' && !v.routeId) {
+      // Pool vehicle — keep but no carry-over flag
+      return true;
+    }
+    if(['inside','dock','loaded','breakdown'].includes(v.status) && v.routeId) {
       v.isCarryOver=true; v.carryOverDate=last;
       return true;
     }
     return false;
   });
 
-  // ── Step 3: Carry-over all routes (physically present vehicles linked, planned become Short)
+  // Step 3: Routes
+  // departed vehicle → remove route
+  // planned vehicle (never arrived) → Short carry-over
+  // present vehicle → carry-over with vehicle
+  // already short (no vehicle) → Short carry-over
   routes = oldRoutes.filter(r => {
+    if(r.vehicleId && departedVids.has(r.vehicleId)) return false; // departed → remove
     const v=vehicles.find(x=>x.id===r.vehicleId);
-    if(v) {
-      // Vehicle is physically present — carry-over with vehicle
-      r.isCarryOver=true; r.carryOverDate=last; return true;
-    }
-    // No vehicle (planned never arrived, or short) → carry-over as Short
+    if(v) { r.isCarryOver=true; r.carryOverDate=last; return true; } // present → carry-over
+    if(r.vehicleId && !plannedVids.has(r.vehicleId)) return false; // unknown → drop
     r.vehicleId=null; r.status='short';
-    r.isCarryOver=true; r.carryOverDate=last; return true;
+    r.isCarryOver=true; r.carryOverDate=last; return true; // planned/short → Short carry-over
   });
 
-  // ── Step 4: Activate tomorrow's plan ──────────────────────────────
+  // Step 4: Activate tomorrow's plan
   const busyNumbers=new Set(
     vehicles.filter(v=>['inside','dock','loaded'].includes(v.status)&&v.routeId).map(v=>v.number)
   );
   let ra=0, va=0, skipped=[];
-
   if(tomorrowPlan.length) {
     tomorrowPlan.forEach(p=>{
       const rId=genRId();
@@ -1111,9 +1173,10 @@ async function checkDay() {
       if(p.vehicleNo) {
         if(busyNumbers.has(p.vehicleNo)) { skipped.push(p.vehicleNo); return; }
         const m=masterLookup(p.vehicleNo);
-        const poolV=vehicles.find(v=>v.number===p.vehicleNo&&['inside','dock','loaded'].includes(v.status)&&!v.routeId);
+        const poolV=vehicles.find(v=>v.number===p.vehicleNo&&v.status==='inside'&&!v.routeId);
         if(poolV) {
-          poolV.routeId=rId; route.vehicleId=poolV.id; route.status=poolV.status; va++;
+          poolV.routeId=rId; poolV.isCarryOver=true; poolV.carryOverDate=last;
+          route.vehicleId=poolV.id; route.status=poolV.status; va++;
         } else {
           const vId=genId();
           const veh={id:vId,number:p.vehicleNo,type:p.type||(m?.type||'24ft'),vendor:p.vendor!=='—'?p.vendor:(m?.vendor||'—'),dock:'—',routeId:rId,status:'planned',times:{planned:'00:00'},date:TODAY,eta:p.eta};
@@ -1125,51 +1188,48 @@ async function checkDay() {
     localStorage.removeItem('gnsc_tomorrow');
   }
 
-  const co=vehicles.filter(v=>v.isCarryOver).length;
-  const msgs=[];
-  if(ra) msgs.push(ra+' routes from tomorrow\'s plan');
-  if(co) msgs.push(co+' carry-over vehicles');
-  if(skipped.length) msgs.push(skipped.length+' vehicles skipped');
-  if(msgs.length) toast('🌅 New day · '+msgs.join(' · '));
-
-  // Clear actual indent for new day
+  // Step 5: Reset indent
   actualIndent=0;
   localStorage.setItem('gnsc_actual_indent','0');
   localStorage.setItem('gnsc_indent_date',TODAY);
 
-  // ATOMIC WRITE: Use Firebase transaction to ensure only ONE device wins
-  // Transaction only succeeds if dayKey is still yesterday — prevents race condition
-  let writeSuccess = false;
+  // Step 6: Firebase transaction — only one device wins
+  let writeSuccess=false;
   if(typeof db!=='undefined') {
     try {
-      const result = await db.ref('gnsc/live/dayKey').transaction(currentDayKey => {
-        // Only write if dayKey is NOT already today
-        if(currentDayKey === TODAY) return; // abort transaction
-        return TODAY; // set to today
+      const result=await db.ref('gnsc/live/dayKey').transaction(cur=>{
+        if(cur===TODAY) return; // abort — another device already reset
+        return TODAY;
       });
-      writeSuccess = result.committed;
-      console.log('checkDay: transaction', writeSuccess ? 'committed ✅' : 'aborted (another device won)');
-    } catch(e) {
-      console.warn('checkDay: transaction failed', e);
-      writeSuccess = true; // fallback — proceed anyway if Firebase unavailable
-    }
-  } else {
-    writeSuccess = true; // offline — proceed
-  }
+      writeSuccess=result.committed;
+    } catch(e) { writeSuccess=true; } // offline fallback
+  } else { writeSuccess=true; }
 
   if(!writeSuccess) {
-    // Another device won the transaction — don't overwrite Firebase
+    // Another device won — sync from Firebase instead
+    toast('✅ New day already started by another device — syncing');
     localStorage.setItem('gnsc_lastday', TODAY);
-    autoArchive();
     return;
   }
 
+  // Step 7: Save and sync
   save();
-  syncDaily();
-  if(typeof db!=='undefined') db.ref('gnsc/daily/lastday').set(TODAY).catch(e=>console.warn(e));
-  localStorage.setItem('gnsc_lastday',TODAY);
-  autoArchive();
+  if(typeof db!=='undefined') {
+    db.ref('gnsc/daily').update({lastday:TODAY,actualIndent:0,tomorrowPlan:[]}).catch(e=>console.warn(e));
+  }
+  localStorage.setItem('gnsc_lastday', TODAY);
+
+  const co=vehicles.filter(v=>v.isCarryOver).length;
+  const pool=vehicles.filter(v=>v.status==='inside'&&!v.routeId).length;
+  const msgs=[];
+  if(ra) msgs.push(ra+' routes activated');
+  if(co) msgs.push(co+' carry-over'+(co>1?'s':''));
+  if(pool) msgs.push(pool+' pool vehicle'+(pool>1?'s':''));
+  if(skipped.length) msgs.push(skipped.length+' skipped');
+  toast('\ud83c\udf05 New day started'+(msgs.length?' \u00b7 '+msgs.join(' \u00b7 '):''));
+  renderCOBan(); renderAll(); updateCutBan();
 }
+
 
 function autoArchive() {
   vehicles=vehicles.filter(v=>{
@@ -1300,7 +1360,11 @@ function sel(role) {
     requestNotificationPermission().then(()=>startDockAlertPoll());
   } else stopDockAlertPoll();
   // Indent prompt for transport on first login of the day
-  if(role==='transport') checkIndentPrompt();
+  // Only prompt for indent if not already entered today
+  if(role==='transport') {
+    const indentDate = localStorage.getItem('gnsc_indent_date');
+    if(!actualIndent || indentDate !== TODAY) checkIndentPrompt();
+  }
 }
 function checkIndentPrompt() {
   const planned=masterIndent[TODAY]||0;
@@ -1483,7 +1547,7 @@ function renderDash() {
   // Yesterday carry-overs
   const ydayRoutes   = routes.filter(r=>r.isCarryOver);
   const ydayVehicles = vehicles.filter(v=>v.isCarryOver);
-  const ydayInside   = ydayVehicles.filter(v=>['inside','dock','loaded'].includes(v.status));
+  const ydayInside   = ydayVehicles.filter(v=>['inside','dock','loaded'].includes(v.status)&&v.routeId); // exclude pool vehicles
   const ydayShort    = ydayRoutes.filter(r=>rSt(r)==='short'||!r.vehicleId);
   const ydayWithV    = ydayRoutes.filter(r=>r.vehicleId&&['inside','dock','loaded'].includes(vehicles.find(x=>x.id===r.vehicleId)?.status||''));
 
@@ -1492,6 +1556,7 @@ function renderDash() {
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
       <div class="pg-time">${nowTime()}</div>
       <button onclick="sendLeaderStatusPush()" style="background:transparent;border:1px solid var(--bdr);color:var(--dim);border-radius:6px;padding:3px 8px;font-size:9px;font-weight:700;cursor:pointer">📊 Push Now</button>
+
     </div></div>
 
     ${ydayRoutes.length?`
@@ -3456,6 +3521,15 @@ function renderPlan() {
 
   el.innerHTML=`
     <div class="pg-h"><div><div class="pg-t">📤 Morning Plan</div><div class="pg-s">${todayRoutes.length} routes · ${shortR.length} short · ${withV.length} with vehicle</div></div></div>
+
+    <!-- START NEW DAY -->
+    <div style="background:linear-gradient(135deg,rgba(244,162,40,.15),rgba(244,162,40,.05));border:2px solid var(--acc);border-radius:var(--r);padding:14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div>
+        <div style="font-weight:800;font-size:14px;color:var(--acc)">🌅 Start New Day</div>
+        <div style="font-size:11px;color:var(--mut);margin-top:2px">Clears yesterday · activates tomorrow's plan · carries over pending vehicles</div>
+      </div>
+      <button onclick="startNewDay()" style="background:var(--acc);color:#000;border:none;border-radius:9px;padding:12px 18px;font-size:13px;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0">Start →</button>
+    </div>
 
     <!-- TODAY'S UPLOAD -->
     <div class="card">
