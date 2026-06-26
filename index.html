@@ -1075,15 +1075,16 @@ async function startNewDay() {
 
   if(!confirm(msg)) return;
 
-  // Check if already done today
-  let fbLastday = null;
+  // Check if reset already successfully completed today (live/dayKey is set by doNewDayReset)
+  // Don't use daily/lastday — that gets set too early by checkDay guards
+  let fbDayKey = null;
   if(typeof db!=='undefined') {
     try {
-      const snap = await db.ref('gnsc/daily/lastday').once('value');
-      fbLastday = snap.val();
+      const snap = await db.ref('gnsc/live/dayKey').once('value');
+      fbDayKey = snap.val();
     } catch(e) {}
   }
-  if(fbLastday===TODAY) {
+  if(fbDayKey===TODAY) {
     toast('✅ New day already started — refreshing data');
     if(currentRole) { renderAll(); updateCutBan(); }
     return;
