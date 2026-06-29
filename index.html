@@ -1598,7 +1598,7 @@ function renderFleet() {
   const lateETA= exp.filter(v=>vEta(v)&&now>t2m(vEta(v)));
   const soonETA= exp.filter(v=>vEta(v)&&now<=t2m(vEta(v))).sort((a,b)=>t2m(vEta(a))-t2m(vEta(b)));
   const noETA  = exp.filter(v=>!vEta(v));
-  const poolV  = vehicles.filter(v=>!v.routeId&&['planned','inside'].includes(v.status)&&!v.masterIncomplete&&masterLookup(v.number)&&!masterLookup(v.number).incomplete);
+  const poolV  = vehicles.filter(v=>!v.routeId&&v.status==='inside'&&!v.masterIncomplete&&masterLookup(v.number)&&!masterLookup(v.number).incomplete);
 
   // City-wise summary
   const cityMap={};
