@@ -612,6 +612,10 @@ function dockN(d)   { return typeof d==='object'?d.name:d; }
 // FIREBASE SYNC
 // ─────────────────────────────────────────────
 let _fbListening=false, _ignoreNext=false;
+// High-water mark: newest data ts this device knows about (local save OR accepted remote).
+// Persisted so a page reload can't reset it to 0 and re-accept a stale snapshot.
+let _myDataTs = parseInt(localStorage.getItem('gnsc_mydata_ts')||'0');
+function _bumpDataTs(ts){ if(ts && ts>_myDataTs){ _myDataTs=ts; localStorage.setItem('gnsc_mydata_ts', String(_myDataTs)); } }
 
 // Remove undefined values recursively — Firebase rejects them
 function sanitize(obj) {
@@ -641,7 +645,9 @@ function save(dayKeyOverride) {
       return;
     }
     _ignoreNext=true;
-    const payload=sanitize({routes,vehicles,actLog:actLog.slice(-200),dayHist,loadHist,ts:Date.now(),dayKey:dayKeyOverride||TODAY,ver:APP_VER,resetTs:RESET_TS});
+    const _ts=Date.now();
+    _bumpDataTs(_ts);
+    const payload=sanitize({routes,vehicles,actLog:actLog.slice(-200),dayHist,loadHist,ts:_ts,dayKey:dayKeyOverride||TODAY,ver:APP_VER,resetTs:RESET_TS});
     db.ref('gnsc/live').set(payload)
       .then(()=>console.log('✅ Firebase push success'))
       .catch(e=>{ console.error('❌ Firebase save error:',e); toast('⚠️ Sync error — check connection','err'); });
@@ -686,7 +692,6 @@ function startFirebaseSync() {
   }
   _fbListening=true;
   // Live data listener
-  let _lastAcceptedTs=0; // track newest data we've accepted
   db.ref('gnsc/live').on('value',snap=>{
     if(_ignoreNext){_ignoreNext=false;return;}
     const d=snap.val(); if(!d) return;
@@ -703,10 +708,11 @@ function startFirebaseSync() {
       return;
     }
 
-    // GUARD 3: Timestamp — reject data older than what we already have
-    // This prevents old devices from overwriting newer data
-    if(d.ts && d.ts < _lastAcceptedTs) {
-      console.log('🚫 Rejecting older data ts:'+d.ts+' last:'+_lastAcceptedTs);
+    // GUARD 3: Timestamp — reject data older than the newest we already hold.
+    // Compares against _myDataTs (persistent high-water mark covering our own
+    // saves too), so a stale snapshot on reconnect/reload can't revert us.
+    if(d.ts && d.ts < _myDataTs) {
+      console.log('🚫 Rejecting older data ts:'+d.ts+' mine:'+_myDataTs);
       return;
     }
 
@@ -718,7 +724,7 @@ function startFirebaseSync() {
       return;
     }
 
-    _lastAcceptedTs = d.ts || Date.now();
+    _bumpDataTs(d.ts || Date.now());
     routes  =d.routes  ||[];
     vehicles=d.vehicles||[];
     actLog  =d.actLog  ||[];
@@ -2342,7 +2348,7 @@ function renderVehicles() {
     {k:'pool',   lb:'🔄 Pool'},
   ];
   // Pool = in master with complete details, no route, not departed
-  const pool = vehicles.filter(v=>!v.routeId&&v.status!=='out'&&!v.masterIncomplete&&masterLookup(v.number)&&!masterLookup(v.number).incomplete);
+  const pool = vehicles.filter(v=>v.status==='inside'&&!v.routeId&&!v.masterIncomplete&&masterLookup(v.number)&&!masterLookup(v.number).incomplete);
   const getList=()=>{
     if(vFilter==='pool')    return pool;
     if(vFilter==='all')     return planned_v;
@@ -3434,14 +3440,11 @@ function renderPlan() {
     </div>`
   :'';
 
-  const TOMORROW = new Date(); TOMORROW.setDate(TOMORROW.getDate()+1);
-  const TMRW_STR = TOMORROW.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
-
   // Tomorrow's plan summary
   const tmrwHtml=tomorrowPlan.length?`
     <div style="background:var(--sur);border:1px solid var(--pur);border-radius:var(--r);margin-bottom:12px;overflow:hidden">
       <div style="padding:9px 13px;background:var(--pud);border-bottom:1px solid var(--pur);display:flex;align-items:center;justify-content:space-between">
-        <div style="font-size:11px;font-weight:800;color:var(--pur)">🌙 Tomorrow's Plan · ${TMRW_STR}</div>
+        <div style="font-size:11px;font-weight:800;color:var(--pur)">🌙 Tomorrow's Plan</div>
         <div style="display:flex;align-items:center;gap:8px">
           <button onclick="dlTomorrowPlan()" style="background:transparent;border:1px solid var(--pur);color:var(--pur);border-radius:5px;padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer">⬇ Export</button>
           <span style="font-size:10px;color:var(--pur)">${tomorrowPlan.length} routes queued</span>
@@ -3465,7 +3468,7 @@ function renderPlan() {
           </div>
         </div>`;
       }).join('')}
-      <div style="padding:8px 13px;background:var(--pud);font-size:10px;color:var(--pur);font-weight:600">⏰ Activates automatically at midnight</div>
+      <div style="padding:8px 13px;background:var(--pud);font-size:10px;color:var(--pur);font-weight:600">⏰ Activates when you press Start New Day</div>
     </div>`:'';
 
   el.innerHTML=`
@@ -3502,7 +3505,7 @@ function renderPlan() {
 
     <!-- TOMORROW'S UPLOAD -->
     <div class="card">
-      <div class="card-t"><div class="card-ic">🌙</div>Tomorrow's Plan <span style="font-size:10px;font-weight:400;color:var(--mut)">· ${TMRW_STR} · activates at midnight</span></div>
+      <div class="card-t"><div class="card-ic">🌙</div>Tomorrow's Plan <span style="font-size:10px;font-weight:400;color:var(--mut)">· activates on Start New Day</span></div>
       <div class="fmt-box" style="margin-bottom:8px">
         <div class="fmt-hdr">Same format — tab separated</div>
         <div class="fmt-eg"><b>Route No</b>	<b>Store Name</b>	<b>Vehicle No</b></div>
@@ -3828,7 +3831,7 @@ function tomorrowUpload() {
   document.getElementById('tmrwPreview').style.display='none';
   document.getElementById('tmrwConfirm').style.display='none';
   log('TRANSPORT','🌙 Tomorrow\'s plan queued: '+parsed.length+' routes','var(--pur)');
-  toast('✅ '+parsed.length+' routes queued for tomorrow midnight');
+  toast('✅ '+parsed.length+' routes queued for tomorrow');
   renderPlan();
 }
 function activateTomorrowNow() {
