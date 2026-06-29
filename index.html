@@ -865,6 +865,21 @@ function rSt(r)   { if(!r||!r.vehicleId) return 'short'; const v=rV(r); return v
 function vDT(v)   { return vR(v)?.destType || v.destType || 'local'; }
 function vCity(v) { return vR(v)?.city    || v.city    || '—'; }
 function vEta(v)  { return vR(v)?.eta     || v.eta     || ''; }
+// Core: is this ETA (HH:MM) genuinely past within the CURRENT working day?
+// Guards the late-night case: if Start New Day ran after this ETA-of-day on the same
+// calendar date, the ETA belongs to the upcoming working day → not overdue.
+function etaOverdueToday(eta) {
+  if(!eta) return false;
+  const etaM = t2m(eta);
+  if(nowMins() <= etaM) return false;
+  if(RESET_TS) {
+    const rd = new Date(RESET_TS);
+    const rm = rd.getHours()*60 + rd.getMinutes();
+    if((new Date()).toDateString() === rd.toDateString() && rm > etaM) return false;
+  }
+  return true;
+}
+function isEtaOverdue(v) { return etaOverdueToday(vEta(v)); }
 function vSt(v)   { return vR(v)?.stores  || v.stores  || []; }
 function vRNo(v)  { return vR(v)?.routeNo || ''; }
 function cutoff(r){ return (r?.destType||vDT(r||{})) === 'outstation' ? CUT_OS : CUT_L; }
@@ -1595,8 +1610,8 @@ function renderFleet() {
   const exp    = vehicles.filter(v=>v.status==='planned'&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete);
   const broke  = vehicles.filter(v=>v.status==='breakdown'&&v.routeId&&!v.isUnplanned&&!v.masterIncomplete);
   const shortR = routes.filter(r=>rSt(r)==='short');
-  const lateETA= exp.filter(v=>vEta(v)&&now>t2m(vEta(v)));
-  const soonETA= exp.filter(v=>vEta(v)&&now<=t2m(vEta(v))).sort((a,b)=>t2m(vEta(a))-t2m(vEta(b)));
+  const lateETA= exp.filter(v=>isEtaOverdue(v));
+  const soonETA= exp.filter(v=>vEta(v)&&!isEtaOverdue(v)).sort((a,b)=>t2m(vEta(a))-t2m(vEta(b)));
   const noETA  = exp.filter(v=>!vEta(v));
   const poolV  = vehicles.filter(v=>!v.routeId&&v.status==='inside'&&!v.masterIncomplete&&masterLookup(v.number)&&!masterLookup(v.number).incomplete);
 
@@ -1640,7 +1655,7 @@ function renderFleet() {
 
   // Transporter cards
   const tmap={};
-  vehicles.filter(v=>v.routeId&&!v.isUnplanned&&!v.masterIncomplete).forEach(v=>{ const k=v.vendor&&v.vendor!=='—'?v.vendor:'Unknown'; if(!tmap[k]) tmap[k]={t:0,inG:[],eta:[],late:[],brk:[],out:0}; tmap[k].t++; if(['inside','dock','loaded'].includes(v.status))tmap[k].inG.push(v); if(v.status==='planned'){const e=vEta(v);if(e&&now>t2m(e))tmap[k].late.push(v);else tmap[k].eta.push(v);} if(v.status==='breakdown')tmap[k].brk.push(v); if(v.status==='out')tmap[k].out++; });
+  vehicles.filter(v=>v.routeId&&!v.isUnplanned&&!v.masterIncomplete).forEach(v=>{ const k=v.vendor&&v.vendor!=='—'?v.vendor:'Unknown'; if(!tmap[k]) tmap[k]={t:0,inG:[],eta:[],late:[],brk:[],out:0}; tmap[k].t++; if(['inside','dock','loaded'].includes(v.status))tmap[k].inG.push(v); if(v.status==='planned'){const e=vEta(v);if(etaOverdueToday(e))tmap[k].late.push(v);else tmap[k].eta.push(v);} if(v.status==='breakdown')tmap[k].brk.push(v); if(v.status==='out')tmap[k].out++; });
   const tInfo={}; masterTrans.forEach(t=>{ tInfo[t.name]=t; });
 
   const tmapKeys=Object.keys(tmap);
@@ -1686,7 +1701,7 @@ function renderRoutes() {
   const el=document.getElementById('pg-routes'); if(!el||!el.classList.contains('on')) return;
   const now=nowMins();
   const lRS  = r=>{ if(!r.vehicleId) return 'short'; const v=rV(r); return v?v.status:'short'; };
-  const isDelay = r=>{ const s=lRS(r); if(['short','out','breakdown'].includes(s)) return false; return r.eta&&now>t2m(r.eta); };
+  const isDelay = r=>{ const s=lRS(r); if(['short','out','breakdown'].includes(s)) return false; return etaOverdueToday(r.eta); };
 
   // Unplanned vehicles — gate added, transport needs to assign route
   // Unplanned in routes tab = gate inwarded, in master WITH COMPLETE details, no route assigned
@@ -1702,7 +1717,7 @@ function renderRoutes() {
   // Pool: no route, in master with complete details — includes gate-inwarded vehicles if in master
   const pool=vehicles.filter(v=>{
     if(v.routeId||v.status==='out'||v.masterIncomplete) return false;
-    if(!['planned','inside','dock','loaded'].includes(v.status)) return false;
+    if(v.status!=='inside') return false;
     const m=masterLookup(v.number);
     return m && !m.incomplete && m.vendor && m.vendor!=='—' && m.type && m.type!=='—';
   });
@@ -2507,7 +2522,7 @@ function renderWHDash() {
       ${[...ydayPend,...ydayDock].map(v=>{const r=vR(v);return `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,165,0,.2);font-size:11px"><span style="font-family:var(--mono);font-weight:800">${esc(v.number)}</span><span style="color:var(--mut)">${esc(r?.city||'—')}</span><span style="color:${v.status==='dock'?'var(--pur)':'var(--blu)'}">${SL[v.status]}</span><span class="yday">YDAY</span></div>`;}).join('')}
     </div>`:''}
     ${dAlerts.length?`<div class="sec" style="margin-bottom:8px">🚨 Dock Alerts</div>${dAlerts.map(v=>`<div class="al al-o">⚠️ <strong>${esc(v.number)}</strong> — ${dockMins(v)}m on dock</div>`).join('')}`:''}
-    ${notIn.filter(r=>r.eta&&now>t2m(r.eta)).length?`<div class="sec" style="margin-bottom:8px">⏰ ETA Overdue</div>${notIn.filter(r=>r.eta&&now>t2m(r.eta)).map(r=>{const v=rV(r);return `<div class="al al-o">⏰ <strong>${esc(v?.number||r.city)}</strong> — ${now-t2m(r.eta)}m past ETA</div>`;}).join('')}`:''}
+    ${notIn.filter(r=>etaOverdueToday(r.eta)).length?`<div class="sec" style="margin-bottom:8px">⏰ ETA Overdue</div>${notIn.filter(r=>etaOverdueToday(r.eta)).map(r=>{const v=rV(r);return `<div class="al al-o">⏰ <strong>${esc(v?.number||r.city)}</strong> — ${now-t2m(r.eta)}m past ETA</div>`;}).join('')}`:''}
     ${types.length?`<div class="sec" style="margin-bottom:8px">⏱ Avg Loading Time</div>
     <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
       <div style="display:grid;grid-template-columns:1fr 70px 70px 55px;padding:6px 11px;background:var(--sur2);border-bottom:1px solid var(--bdr)">
@@ -2523,7 +2538,7 @@ function renderWHDash() {
 function showNotIn() {
   const list=routes.filter(r=>rSt(r)==='planned');
   const now=nowMins();
-  let html=list.map(r=>{const v=rV(r);return `<div style="padding:8px 0;border-bottom:1px solid var(--bdr2)"><div style="display:flex;align-items:center;justify-content:space-between"><span style="font-family:var(--mono);font-weight:800;font-size:13px">${esc(v?.number||r.city)}</span>${r.eta?`<span style="font-family:var(--mono);font-size:12px;color:${now>t2m(r.eta)?'var(--red)':'var(--acc)'}">${r.eta}</span>`:'<span style="font-size:10px;color:var(--dim)">No ETA</span>'}</div><div style="font-size:10px;color:var(--mut)">${esc(r.city)} · ${esc(v?.vendor||'—')}</div></div>`;}).join('');
+  let html=list.map(r=>{const v=rV(r);return `<div style="padding:8px 0;border-bottom:1px solid var(--bdr2)"><div style="display:flex;align-items:center;justify-content:space-between"><span style="font-family:var(--mono);font-weight:800;font-size:13px">${esc(v?.number||r.city)}</span>${r.eta?`<span style="font-family:var(--mono);font-size:12px;color:${etaOverdueToday(r.eta)?'var(--red)':'var(--acc)'}">${r.eta}</span>`:'<span style="font-size:10px;color:var(--dim)">No ETA</span>'}</div><div style="font-size:10px;color:var(--mut)">${esc(r.city)} · ${esc(v?.vendor||'—')}</div></div>`;}).join('');
   if(!html) html='<div class="empty"><div class="empty-ic">✅</div><div class="empty-t">All arrived</div></div>';
   oMo('🏭 Not at GNSC',html+'<div style="height:10px"></div><button class="btn-s" onclick="cMo()">Close</button>');
 }
