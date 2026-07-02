@@ -922,9 +922,19 @@ function recLoadTime(v) {
 }
 function etaSt(v) {
   const now=nowMins(), r=vR(v);
-  const cut=t2m(cutoff(r||{destType:vDT(v)}));
   if(v.status==='breakdown') return {label:'🚨 Breakdown',cls:'eta-break'};
   if(v.status==='out')       return {label:'Out at '+(v.times?.out||'—'),cls:'eta-ok'};
+  // Planned / not yet arrived: measure against ETA, not the loading cutoff.
+  // Cutoff only applies once a vehicle is physically inside and being processed.
+  if(v.status==='planned') {
+    const eta=vEta(v);
+    if(!eta) return {label:'⏳ Awaiting ETA',cls:'eta-ok'};
+    if(etaOverdueToday(eta)) { const late=now-t2m(eta); return {label:'⚠️ ETA '+eta+' · '+late+'m late',cls:'eta-late'}; }
+    const df=t2m(eta)-now;
+    if(df<0) return {label:'ETA '+eta,cls:'eta-ok'};
+    return {label:'ETA '+eta+' · in '+df+'m',cls:df<=30?'eta-warn':'eta-ok'};
+  }
+  const cut=t2m(cutoff(r||{destType:vDT(v)}));
   const diff=cut-now;
   const lbl=vDT(v)==='outstation'?'12:30 PM':'10:30 PM';
   if(diff<0)   return {label:'⚠️ '+Math.abs(diff)+'m past cutoff',cls:'eta-late'};
@@ -1647,7 +1657,7 @@ function renderFleet() {
   html+=chipSection('⚠️ Vehicle Short','var(--org)',shortR.map(r=>mChip(r.routeNo||r.city,r.city,'var(--org)','var(--ogd)')));
   html+=chipSection('🚨 Breakdown','var(--red)',broke.map(v=>mChip(v.number,'Since '+(v.times?.breakdown||'—'),'var(--red)','var(--rdd)',true)));
   html+=chipSection('🔴 ETA Overdue','var(--red)',lateETA.map(v=>mChip(v.number,vEta(v)+' · '+(now-t2m(vEta(v)))+'m late','var(--red)','var(--rdd)',true)));
-  html+=chipSection('⏳ Expected','var(--acc)',soonETA.map(v=>{ const df=t2m(vEta(v))-now,urg=df<=30; return mChip(v.number,vEta(v)+' · in '+df+'m',urg?'var(--org)':'var(--acc)',urg?'var(--ogd)':'var(--acd)'); }));
+  html+=chipSection('⏳ Expected','var(--acc)',soonETA.map(v=>{ const df=t2m(vEta(v))-now,urg=df<=30&&df>=0; const txt=df>=0?vEta(v)+' · in '+df+'m':'ETA '+vEta(v); return mChip(v.number,txt,urg?'var(--org)':'var(--acc)',urg?'var(--ogd)':'var(--acd)'); }));
   html+=chipSection('⏳ No ETA','var(--dim)',noETA.map(v=>mChip(v.number,'no eta','var(--dim)','var(--sur2)')));
 
   // City-wise summary
@@ -3670,6 +3680,15 @@ function renderPilot() {
     <div class="sec" style="margin-bottom:8px">🏭 Vehicles in GNSC</div>
     ${vHtml}
     <div style="height:16px"></div>`;
+  // Repeat alert (beep/vibrate/flash) until acknowledged — same behaviour as the gate view,
+  // so Clear Dock and every other pilot alert keeps firing even if the initial push was missed.
+  // Only (re)start when the pending set changes, so the 4s re-render doesn't reset the beep.
+  const alertKey = alerts.map(a=>a.id||a.vid).sort().join(',');
+  if(alerts.length) {
+    if(alertKey !== window._pilotAlertKey) { window._pilotAlertKey = alertKey; startAlertRepeat(alerts); }
+  } else if(window._pilotAlertKey) {
+    window._pilotAlertKey = ''; stopAlertRepeat();
+  }
 }
 
 // Also refresh pilot view when alerts arrive
