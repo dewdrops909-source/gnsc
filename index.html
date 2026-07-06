@@ -451,7 +451,7 @@ window.addEventListener('unhandledrejection',e=>{
 // ─────────────────────────────────────────────
 // DATA
 // ─────────────────────────────────────────────
-const APP_VER = 11; // increment with every deploy
+const APP_VER = 12; // increment with every deploy
 
 // Force re-login if app version changed
 const _storedVer = parseInt(localStorage.getItem('gnsc_app_ver')||'0');
@@ -1463,7 +1463,10 @@ function renderDash() {
   const total = todayRoutes.length;
 
   // Stage tracking — only vehicles assigned to a route (not pool, not carry-over)
-  const assigned = v => !!v.routeId && !v.isCarryOver;
+  // Require the routeId to match a LIVE today-route: after swaps/removals a vehicle can
+  // keep a routeId pointing at a route that no longer exists, which would inflate counts.
+  const todayIds = new Set(todayRoutes.map(r=>r.id));
+  const assigned = v => !!v.routeId && !v.isCarryOver && todayIds.has(v.routeId);
   const planned = vehicles.filter(v=>assigned(v)&&v.status==='planned');
   const inside  = vehicles.filter(v=>assigned(v)&&v.status==='inside');
   const atDock  = vehicles.filter(v=>assigned(v)&&v.status==='dock');
