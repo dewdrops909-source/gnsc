@@ -3133,6 +3133,34 @@ function gSearch(val) {
   const q=val.trim().toUpperCase().replace(/\s+/g,'');
   if(q.length<3){ res.innerHTML=''; return; }
 
+  // Last-4-digit lookup: if the gate types exactly 4 digits, search the fleet master
+  // for all vehicles whose number ends in those digits, and let them pick the full number.
+  if(/^[0-9]{4}$/.test(q)) {
+    const matches=masterVehicles.filter(m=>(m.number||'').replace(/\s+/g,'').toUpperCase().endsWith(q));
+    if(matches.length===1) {
+      // Single match → hand the full number to the normal search flow (handles plan/pool/inside)
+      gSearch(matches[0].number);
+      return;
+    }
+    if(matches.length>1) {
+      res.innerHTML=`<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:13px">
+        <div style="font-size:11px;font-weight:700;color:var(--mut);margin-bottom:9px">🔍 ${matches.length} vehicles end in ${esc(q)} — select one:</div>
+        ${matches.map(m=>`<button class="act-btn" style="background:var(--bld);color:var(--blu);border:1px solid var(--blu);margin-bottom:7px;text-align:left;font-family:var(--mono);font-weight:800;font-size:15px" onclick="gPickFull('${esc(m.number)}')">${esc(m.number)}<span style="font-family:'Inter',sans-serif;font-weight:400;font-size:11px;color:var(--mut);display:block;margin-top:2px">${esc(m.vendor!=='—'?m.vendor:'—')} · ${esc(m.type)}</span></button>`).join('')}
+        <button class="act-btn" style="background:var(--sur2);color:var(--mut);border:1px solid var(--bdr);margin-bottom:0" onclick="gClear()">✕ Cancel</button>
+      </div>`;
+      return;
+    }
+    // No master match for these 4 digits → new-vehicle prompt asking for the full number
+    res.innerHTML=`<div style="background:var(--sur);border:1px solid var(--org);border-radius:var(--r);padding:13px">
+      <div style="font-size:13px;font-weight:800;color:var(--org);margin-bottom:5px">🆕 New vehicle</div>
+      <div style="font-size:12px;color:var(--mut);margin-bottom:10px">No vehicle ending in <strong>${esc(q)}</strong> found in fleet master. Enter the full vehicle number to inward it.</div>
+      <input id="gFull" type="text" placeholder="Full vehicle number..." autocapitalize="characters" style="width:100%;background:var(--sur2);border:2px solid var(--org);border-radius:9px;padding:12px 13px;color:var(--txt);font-family:var(--mono);font-size:16px;font-weight:700;letter-spacing:1px;outline:none;box-sizing:border-box;margin-bottom:10px" oninput="this.value=this.value.toUpperCase()">
+      <button class="act-btn" style="background:var(--org);color:#000;margin-bottom:7px" onclick="gFullEntered()">Continue →</button>
+      <button class="act-btn" style="background:var(--sur2);color:var(--mut);border:1px solid var(--bdr);margin-bottom:0" onclick="gClear()">✕ Cancel</button>
+    </div>`;
+    return;
+  }
+
   // Case 1: Already in today's plan
   const v=vehicles.find(x=>x.number.replace(/\s+/g,'').toUpperCase()===q||x.number.replace(/\s+/g,'').toUpperCase().endsWith(q));
   if(v) {
@@ -3190,6 +3218,19 @@ function gSearch(val) {
   </div>`;
 }
 function gClear() { const i=document.getElementById('gSrch');if(i)i.value=''; const r=document.getElementById('gRes');if(r)r.innerHTML=''; }
+function gPickFull(num) {
+  // Gate selected a full number from the last-4 pick-list → run the normal search flow for it
+  const i=document.getElementById('gSrch'); if(i) i.value=num;
+  gSearch(num);
+}
+function gFullEntered() {
+  // Gate typed a full number for a vehicle not found by last-4 → validate and route to normal flow
+  const inp=document.getElementById('gFull'); if(!inp) return;
+  const full=inp.value.trim().toUpperCase().replace(/\s+/g,'');
+  if(full.length<6){ toast('Enter the full vehicle number','err'); return; }
+  const i=document.getElementById('gSrch'); if(i) i.value=full;
+  gSearch(full);
+}
 function gAddKnown(num, vendor, type) {
   // Known vehicle (in master), not in today's plan — inward as pool, alert transport
   if(vehicles.find(v=>v.number===num&&v.status!=='out')){ toast('Already inwarded'); return; }
