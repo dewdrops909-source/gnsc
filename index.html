@@ -1076,7 +1076,7 @@ async function startNewDay() {
 
   // 12-hour guard: only admin can press again within 12 hours
   const lastResetTs = parseInt(localStorage.getItem('gnsc_reset_ts')||'0');
-  const hrsSince = lastResetTs ? (Date.now()-lastResetTs)/3600000 : 99;
+  const hrsSince = lastResetTs ? (serverNow()-lastResetTs)/3600000 : 99;
   if(hrsSince < 12) {
     if(currentUser?.role !== 'admin') {
       toast('⚠️ Already started today — only admin can run again within 12 hours','err');
@@ -1202,7 +1202,7 @@ async function doNewDayReset() {
 
   // Step 7: Set RESET_TS — stamp ALL non-carry-over routes/vehicles with this timestamp
   // Everything created NOW or later is "today's" data
-  RESET_TS = Date.now();
+  RESET_TS = serverNow();
   localStorage.setItem('gnsc_reset_ts', String(RESET_TS));
   routes.forEach(r   => { if(!r.isCarryOver) r.createdAt = RESET_TS; });
   vehicles.forEach(v => { if(!v.isCarryOver) v.createdAt = RESET_TS; });
@@ -2097,7 +2097,7 @@ function doAssignNew(rid) {
   if(!validVNum(num)){ toast('⚠️ Invalid format — e.g. MH04AB1234 or MH04A1234','err'); return; }
   if(vehicles.find(v=>v.number===num&&v.status!=='out')){ toast('⚠️ Vehicle already active','err'); return; }
   const m=masterLookup(num);
-  const v={id:genId(),number:num,type:m?.type||'24ft',vendor:vnd!=='—'?vnd:(m?.vendor||'—'),dock:'—',routeId:null,status:'planned',times:{planned:nowTime()},date:TODAY,createdAt:Date.now()};
+  const v={id:genId(),number:num,type:m?.type||'24ft',vendor:vnd!=='—'?vnd:(m?.vendor||'—'),dock:'—',routeId:null,status:'planned',times:{planned:nowTime()},date:TODAY,createdAt:serverNow()};
   vehicles.push(v); link(v.id,rid); masterUpsert(num,v.vendor,v.type);
   log(num,'➕ New → '+r.routeNo,'var(--blu)');
   save(); cMo(); toast(num+' → '+r.city); renderAll();
@@ -2186,7 +2186,7 @@ function doSplit(rid) {
   const nr=(document.getElementById('srno')?.value||'').trim()||r.routeNo+'-B';
   const ns=sel.map(i=>r.stores[i]);
   r.stores=r.stores.filter((_,i)=>!sel.includes(i));
-  routes.push({id:genRId(),routeNo:nr,city:nc,stores:ns,destType:r.destType,eta:r.eta,notes:r.notes,vehicleId:null,status:'short',date:TODAY,createdAt:Date.now()});
+  routes.push({id:genRId(),routeNo:nr,city:nc,stores:ns,destType:r.destType,eta:r.eta,notes:r.notes,vehicleId:null,status:'short',date:TODAY,createdAt:serverNow()});
   log(r.routeNo,'✂️ Split → '+nr,'var(--pur)');
   save(); cMo(); toast('Split → '+nr); renderRoutes();
 }
@@ -3253,7 +3253,7 @@ function gFullEntered() {
 function gAddKnown(num, vendor, type) {
   // Known vehicle (in master), not in today's plan — inward as pool, alert transport
   if(vehicles.find(v=>v.number===num&&v.status!=='out')){ toast('Already inwarded'); return; }
-  const v={id:genId(),number:num,type:type||'24ft',vendor:vendor||'—',dock:'—',routeId:null,status:'inside',times:{planned:nowTime(),inside:nowTime()},date:TODAY,isUnplanned:true,createdAt:Date.now()};
+  const v={id:genId(),number:num,type:type||'24ft',vendor:vendor||'—',dock:'—',routeId:null,status:'inside',times:{planned:nowTime(),inside:nowTime()},date:TODAY,isUnplanned:true,createdAt:serverNow()};
   vehicles.push(v);
   log(num,'🚛 Inwarded (not in plan) · transport alerted','var(--org)');
   save(); toast('⚠️ '+num+' inwarded · transport alerted'); gClear(); renderAll();
@@ -3261,7 +3261,7 @@ function gAddKnown(num, vendor, type) {
 function gAddUnknown(num) {
   // Not in master — inward with incomplete details, transport must complete master
   if(vehicles.find(v=>v.number===num&&v.status!=='out')){ toast('Already inwarded'); return; }
-  const v={id:genId(),number:num,type:'—',vendor:'—',dock:'—',routeId:null,status:'inside',times:{planned:nowTime(),inside:nowTime()},date:TODAY,isUnplanned:true,masterIncomplete:true,createdAt:Date.now()};
+  const v={id:genId(),number:num,type:'—',vendor:'—',dock:'—',routeId:null,status:'inside',times:{planned:nowTime(),inside:nowTime()},date:TODAY,isUnplanned:true,masterIncomplete:true,createdAt:serverNow()};
   vehicles.push(v);
   // Add skeleton to master so transport can fill in details
   if(!masterLookup(num)) masterVehicles.push({number:num,vendor:'—',type:'—',incomplete:true});
@@ -3410,7 +3410,7 @@ function addVehicle() {
   const finalVnd=existing?.vendor!=='—'?existing.vendor:vnd;
   const finalType=existing?.type!=='—'?existing.type:type;
 
-  const v={id:genId(),number:num,type:finalType,vendor:finalVnd,dock:'—',routeId:null,status:addArrival,times:{planned:nowTime()},date:TODAY,eta,createdAt:Date.now()};
+  const v={id:genId(),number:num,type:finalType,vendor:finalVnd,dock:'—',routeId:null,status:addArrival,times:{planned:nowTime()},date:TODAY,eta,createdAt:serverNow()};
   if(addArrival==='inside') v.times.inside=nowTime();
   vehicles.push(v);
 
@@ -3469,11 +3469,11 @@ function addRoute() {
     }
   }
 
-  const r={id:genRId(),routeNo:rNo,city,stores:storeList,destType,eta,notes,vehicleId:null,status:'short',date:TODAY,createdAt:Date.now()};
+  const r={id:genRId(),routeNo:rNo,city,stores:storeList,destType,eta,notes,vehicleId:null,status:'short',date:TODAY,createdAt:serverNow()};
   routes.push(r);
   if(vNum) {
     let v=vehicles.find(x=>x.number===vNum&&x.status!=='out');
-    if(!v){ const m=masterLookup(vNum); v={id:genId(),number:vNum,type:m?.type||'24ft',vendor:m?.vendor||'—',dock:'—',routeId:null,status:'planned',times:{planned:nowTime()},date:TODAY,eta,createdAt:Date.now()}; vehicles.push(v); }
+    if(!v){ const m=masterLookup(vNum); v={id:genId(),number:vNum,type:m?.type||'24ft',vendor:m?.vendor||'—',dock:'—',routeId:null,status:'planned',times:{planned:nowTime()},date:TODAY,eta,createdAt:serverNow()}; vehicles.push(v); }
     link(v.id,r.id);
     log(rNo,'📍 Route added · '+vNum+' assigned','var(--acc)');
   } else { log(rNo,'📍 Route added (short) · '+city,'var(--org)'); }
@@ -3956,7 +3956,7 @@ function activateTomorrowNow() {
         poolV.routeId=rId; route.vehicleId=poolV.id; route.status=poolV.status; va++;
       } else if(!existingVNums.has(p.vehicleNo)) {
         const vId=genId();
-        const veh={id:vId,number:p.vehicleNo,type:m?.type||'24ft',vendor:m?.vendor||'—',dock:'—',routeId:rId,status:'planned',times:{planned:nowTime()},date:nextDate,eta:p.eta||'17:00',createdAt:Date.now()};
+        const veh={id:vId,number:p.vehicleNo,type:m?.type||'24ft',vendor:m?.vendor||'—',dock:'—',routeId:rId,status:'planned',times:{planned:nowTime()},date:nextDate,eta:p.eta||'17:00',createdAt:serverNow()};
         vehicles.push(veh); route.vehicleId=vId; route.status='planned'; va++;
       } else {
         skipped.push(p.vehicleNo);
@@ -4054,7 +4054,7 @@ function bulkUpload(append=false) {
 
     // Create route
     const rId=genRId();
-    const route={id:rId,routeNo:p.routeNo,city:p.city,stores:p.stores,destType:p.destType,eta:p.eta,notes:'',vehicleId:null,status:'short',date:TODAY,createdAt:Date.now()};
+    const route={id:rId,routeNo:p.routeNo,city:p.city,stores:p.stores,destType:p.destType,eta:p.eta,notes:'',vehicleId:null,status:'short',date:TODAY,createdAt:serverNow()};
     routes.push(route);
     ra++;
 
@@ -4096,7 +4096,7 @@ function bulkUpload(append=false) {
         if(!validVNum(p.vehicleNo)){ conflicts.push({rNo:p.routeNo,vNo:p.vehicleNo,reason:'invalid vehicle number format'}); }
         const vId=genId();
         const m=masterLookup(p.vehicleNo);
-        const veh={id:vId,number:p.vehicleNo,type:p.type||(m?.type||'24ft'),vendor:p.vendor!=='—'?p.vendor:(m?.vendor||'—'),dock:'—',routeId:rId,status:'planned',times:{planned:nowTime()},date:TODAY,eta:p.eta,createdAt:Date.now()};
+        const veh={id:vId,number:p.vehicleNo,type:p.type||(m?.type||'24ft'),vendor:p.vendor!=='—'?p.vendor:(m?.vendor||'—'),dock:'—',routeId:rId,status:'planned',times:{planned:nowTime()},date:TODAY,eta:p.eta,createdAt:serverNow()};
         vehicles.push(veh);
         masterUpsert(veh.number,veh.vendor,veh.type);
         va++;
