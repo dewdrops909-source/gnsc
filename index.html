@@ -612,6 +612,12 @@ function dockN(d)   { return typeof d==='object'?d.name:d; }
 // FIREBASE SYNC
 // ─────────────────────────────────────────────
 let _fbListening=false, _ignoreNext=false;
+// Server-clock correction. Every timestamp used for cross-device ordering must be
+// measured against the SAME clock, otherwise a device with a fast/slow local clock
+// poisons the shared ordering and rejects everyone else's data as "old". Firebase
+// exposes the offset between this device's clock and the server at .info/serverTimeOffset.
+let _serverOffset = 0;
+function serverNow(){ return Date.now() + _serverOffset; }
 // High-water mark: newest data ts this device knows about (local save OR accepted remote).
 // Persisted so a page reload can't reset it to 0 and re-accept a stale snapshot.
 let _myDataTs = parseInt(localStorage.getItem('gnsc_mydata_ts')||'0');
@@ -645,7 +651,7 @@ function save(dayKeyOverride) {
       return;
     }
     _ignoreNext=true;
-    const _ts=Date.now();
+    const _ts=serverNow();
     _bumpDataTs(_ts);
     const payload=sanitize({routes,vehicles,actLog:actLog.slice(-200),dayHist,loadHist,ts:_ts,dayKey:dayKeyOverride||TODAY,ver:APP_VER,resetTs:RESET_TS});
     db.ref('gnsc/live').set(payload)
@@ -658,7 +664,7 @@ function forcePushToFirebase() {
   if(!confirm('Force push all local data to Firebase?\n\nThis will overwrite Firebase with what is currently on this device.')) return;
   const payload = {
     routes, vehicles, actLog, dayHist, loadHist,
-    ts: Date.now(),
+    ts: serverNow(),
     dayKey: TODAY||getToday(),
     ver: APP_VER,
     resetTs: RESET_TS
@@ -691,6 +697,19 @@ function startFirebaseSync() {
     return;
   }
   _fbListening=true;
+  // Track the server/client clock offset so all cross-device timestamps agree.
+  // Also self-heal a poisoned high-water mark: a mark set from a fast local clock
+  // can sit in the future and reject every legitimately newer update forever.
+  // A valid mark can never exceed server-corrected "now", so clamp it back down.
+  db.ref('.info/serverTimeOffset').on('value',s=>{
+    _serverOffset = s.val() || 0;
+    const sNow = serverNow();
+    if(_myDataTs > sNow){
+      console.warn('⏱️ Clamping future high-water mark',_myDataTs,'→',sNow);
+      _myDataTs = sNow;
+      localStorage.setItem('gnsc_mydata_ts', String(_myDataTs));
+    }
+  });
   // Live data listener
   db.ref('gnsc/live').on('value',snap=>{
     if(_ignoreNext){_ignoreNext=false;return;}
@@ -724,7 +743,7 @@ function startFirebaseSync() {
       return;
     }
 
-    _bumpDataTs(d.ts || Date.now());
+    _bumpDataTs(d.ts || serverNow());
     routes  =d.routes  ||[];
     vehicles=d.vehicles||[];
     actLog  =d.actLog  ||[];
