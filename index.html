@@ -2743,7 +2743,7 @@ let _lastNotifTs = 0; // prevent showing same notification twice
 function pushNotifToAll(role, title, body) {
   // Write notification to Firebase — all devices with that role will pick it up
   if(typeof db==='undefined') return;
-  const notif = sanitize({role, title, body, ts: Date.now()});
+  const notif = sanitize({role, title, body, ts: serverNow()});
   db.ref('gnsc/notifications').push(notif).catch(e=>console.warn('notif push:',e));
 }
 
@@ -2755,7 +2755,7 @@ function startNotifListener() {
     // Find newest notification for this role that we haven't shown yet
     const entries = Object.values(all).filter(n=>
       n.ts > _lastNotifTs &&
-      n.ts > Date.now() - 10000 && // only show if within last 10 seconds (fresh)
+      n.ts > serverNow() - 10000 && // only show if within last 10 seconds (fresh)
       (n.role === currentRole || n.role === 'all')
     );
     entries.forEach(n=>{
@@ -2768,7 +2768,7 @@ function startNotifListener() {
     if(typeof db==='undefined') return;
     db.ref('gnsc/notifications').once('value', snap=>{
       const all=snap.val(); if(!all) return;
-      const cutoff=Date.now()-(60*60*1000); // 1 hour
+      const cutoff=serverNow()-(60*60*1000); // 1 hour
       Object.entries(all).forEach(([k,v])=>{ if(v.ts<cutoff) db.ref('gnsc/notifications/'+k).remove(); });
     });
   }, 60*60*1000);
