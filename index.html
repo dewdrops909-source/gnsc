@@ -451,7 +451,7 @@ window.addEventListener('unhandledrejection',e=>{
 // ─────────────────────────────────────────────
 // DATA
 // ─────────────────────────────────────────────
-const APP_VER = 13; // increment with every deploy
+const APP_VER = 14; // increment with every deploy
 
 // Force re-login if app version changed
 const _storedVer = parseInt(localStorage.getItem('gnsc_app_ver')||'0');
@@ -612,6 +612,8 @@ function dockN(d)   { return typeof d==='object'?d.name:d; }
 // FIREBASE SYNC
 // ─────────────────────────────────────────────
 let _fbListening=false, _ignoreNext=false;
+// Remote force-update signal state (see the gnsc/control listener).
+let _controlSeen=false, _lastControlTs=0;
 // Server-clock correction. Every timestamp used for cross-device ordering must be
 // measured against the SAME clock, otherwise a device with a fast/slow local clock
 // poisons the shared ordering and rejects everyone else's data as "old". Firebase
@@ -672,6 +674,16 @@ function forcePushToFirebase() {
   db.ref('gnsc/live').set(payload)
     .then(()=>{ toast('✅ Force push successful — Firebase updated'); })
     .catch(e=>{ toast('❌ Push failed: '+e.message,'err'); });
+}
+// Force every open device to reload the latest deployed version and log out.
+// Use this after deploying an update so the whole team lands on the new build
+// without waiting for each device to relaunch.
+function forceUpdateAllDevices() {
+  if(typeof db==='undefined') { toast('Firebase not connected','err'); return; }
+  if(!confirm('Force ALL devices to reload and log out?\n\nEveryone will be signed out and reloaded onto the latest version, and will need to log in again. Do this right after deploying an update.')) return;
+  db.ref('gnsc/control').set(sanitize({reloadTs:serverNow(), logout:true, by:currentUser?.name||'admin', ver:APP_VER}))
+    .then(()=>toast('✅ Update signal sent — all devices will reload & log out'))
+    .catch(e=>toast('❌ Failed: '+e.message,'err'));
 }
 
 function saveMasters() {
@@ -810,6 +822,23 @@ function startFirebaseSync() {
     localStorage.setItem(ALERT_KEY,JSON.stringify(alerts));
     if(currentRole==='gate') checkGateAlerts();
     if(currentRole==='pilot') checkPilotAlerts();
+  });
+  // Remote force-update listener — admin can make every open device reload (and
+  // log out) via the "Force Update All Devices" button. We ignore the initial
+  // snapshot (current state on load) and only react to a NEW signal that arrives
+  // while this instance is running, so a freshly-loaded device never reloads
+  // itself and there's no clock dependency.
+  db.ref('gnsc/control').on('value',snap=>{
+    const c=snap.val();
+    const ts=(c&&c.reloadTs)||0;
+    if(!_controlSeen){ _controlSeen=true; _lastControlTs=ts; return; } // initial state — ignore
+    if(ts>_lastControlTs){
+      _lastControlTs=ts;
+      if(c.logout) localStorage.removeItem('gnsc_session');
+      if(window.caches) caches.keys().then(ks=>ks.forEach(k=>caches.delete(k))).catch(()=>{});
+      toast('🔄 Updating to the latest version…');
+      setTimeout(()=>location.reload(),400);
+    }
   });
   console.log('%c🔥 Firebase sync active','color:#F4A228;font-weight:bold');
 }
@@ -4317,6 +4346,8 @@ function renderMasters() {
         <span id="danger_arr" style="color:var(--dim);font-size:14px">▾</span>
       </div>
       <div id="danger_body" style="display:none;border-top:1px solid var(--red);padding:12px 13px">
+        <button onclick="forceUpdateAllDevices()" style="width:100%;padding:12px;background:var(--acd);border:1px solid var(--acc);color:var(--acc);border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;margin-bottom:8px">🔄 Force Update All Devices — Reload &amp; Log Out</button>
+        <div style="font-size:10px;color:var(--mut);margin:-4px 0 10px;line-height:1.4">Signs out every open device and reloads it onto the latest deployed version. Use right after deploying an update.</div>
         <button onclick="forcePushToFirebase()" style="width:100%;padding:12px;background:rgba(0,120,255,.15);border:1px solid #0078ff;color:#0078ff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px">📤 Force Push to Firebase</button>
         <button onclick="clearData()" style="width:100%;padding:11px;background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px">🗑 Clear All Data — Fresh Start</button>
         <div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Clear Specific Master</div>
