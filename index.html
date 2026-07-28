@@ -451,7 +451,7 @@ window.addEventListener('unhandledrejection',e=>{
 // ─────────────────────────────────────────────
 // DATA
 // ─────────────────────────────────────────────
-const APP_VER = 15; // increment with every deploy
+const APP_VER = 16; // increment with every deploy
 
 // Force re-login if app version changed
 const _storedVer = parseInt(localStorage.getItem('gnsc_app_ver')||'0');
@@ -625,6 +625,30 @@ function serverNow(){ return Date.now() + _serverOffset; }
 let _myDataTs = parseInt(localStorage.getItem('gnsc_mydata_ts')||'0');
 function _bumpDataTs(ts){ if(ts && ts>_myDataTs){ _myDataTs=ts; localStorage.setItem('gnsc_mydata_ts', String(_myDataTs)); } }
 
+// RESET_TS integrity — the last "Start New Day" can never be in the future. A future
+// value (from a device whose clock ran ahead, propagated by "always take the larger")
+// makes brand-new uploads look "older than the reset" and wrongly flags them as
+// carry-overs. Guard both our own value and any value adopted from Firebase.
+function clampResetTs(){
+  if(RESET_TS && RESET_TS > serverNow()){
+    console.warn('⏱️ Discarding future RESET_TS', new Date(RESET_TS).toString());
+    RESET_TS = 0;
+    localStorage.setItem('gnsc_reset_ts','0');
+    return true;
+  }
+  return false;
+}
+function adoptResetTs(incoming){
+  if(!incoming) return false;
+  if(incoming > serverNow()) return false;             // reject future (poisoned) values
+  if(incoming > RESET_TS || RESET_TS > serverNow()){   // newer, or ours is invalid/future
+    RESET_TS = incoming;
+    localStorage.setItem('gnsc_reset_ts', String(RESET_TS));
+    return true;
+  }
+  return false;
+}
+
 // Remove undefined values recursively — Firebase rejects them
 function sanitize(obj) {
   return JSON.parse(JSON.stringify(obj, (k,v)=>v===undefined?null:v));
@@ -721,17 +745,17 @@ function startFirebaseSync() {
       _myDataTs = sNow;
       localStorage.setItem('gnsc_mydata_ts', String(_myDataTs));
     }
+    // Discard a poisoned future reset marker and clear any pendency it wrongly caused.
+    if(clampResetTs() && currentRole){ healFalseCarryOvers(); renderAll(); }
   });
   // Live data listener
   db.ref('gnsc/live').on('value',snap=>{
     if(_ignoreNext){_ignoreNext=false;return;}
     const d=snap.val(); if(!d) return;
 
-    // GUARD 1: sync resetTs from incoming data — always update if newer
-    if(d.resetTs && d.resetTs > RESET_TS) {
-      RESET_TS = d.resetTs;
-      localStorage.setItem('gnsc_reset_ts', String(RESET_TS));
-    }
+    // GUARD 1: adopt the incoming resetTs if it's a valid (non-future) newer value,
+    // or if our own value is invalid. Future/poisoned values are rejected.
+    adoptResetTs(d.resetTs);
 
     // GUARD 2: Version — reject data from older app versions
     if(d.ver && d.ver < APP_VER) {
@@ -794,12 +818,8 @@ function startFirebaseSync() {
         console.log('checkDay: lastday synced from Firebase →', d.lastday);
       }
     }
-    // Sync resetTs — always use the latest value
-    if(d.resetTs && d.resetTs > RESET_TS) {
-      RESET_TS = d.resetTs;
-      localStorage.setItem('gnsc_reset_ts', String(RESET_TS));
-      console.log('resetTs synced from Firebase daily →', RESET_TS);
-    }
+    // Sync resetTs — adopt only a valid (non-future) value
+    if(adoptResetTs(d.resetTs)) console.log('resetTs synced from Firebase daily →', RESET_TS);
     if(d.actualIndent!==undefined){
       actualIndent=parseInt(d.actualIndent)||0;
       localStorage.setItem('gnsc_actual_indent',String(actualIndent));
@@ -1059,38 +1079,40 @@ function snapshotDay(date) {
 // DAY MANAGEMENT — clean rewrite
 // ─────────────────────────────────────────────
 
-// markCarryOvers: flag vehicles/routes created before last reset as YDAY
-// Called on login/visibility — never resets data, only adds flags
+// markCarryOvers: a carry-over is any routed, non-departed item created BEFORE the
+// current working day began — i.e. before the last "Start New Day" (RESET_TS).
+// The working day is bounded by the reset press, NOT the calendar: items created
+// after the last reset stay "today" even past midnight, until the next reset.
 function markCarryOvers() {
-  if(RESET_TS === 0) return; // no reset has ever run — nothing to flag
+  if(RESET_TS === 0) return; // no reset boundary known — nothing to flag
   let changed = false;
   vehicles.forEach(v => {
     if(v.isCarryOver) return;                          // already flagged
     if(v.status === 'out') return;                     // departed
     if(!v.routeId) return;                             // pool vehicle — never flag
-    if((v.date||TODAY) >= TODAY) return;               // created today → never a carry-over
-    const isOld = v.createdAt ? v.createdAt < RESET_TS : false;
-    if(isOld) { v.isCarryOver=true; v.carryOverDate=v.date||TODAY; changed=true; }
+    if(!v.createdAt || v.createdAt >= RESET_TS) return;// created in the current working day
+    v.isCarryOver=true; v.carryOverDate=v.date||TODAY; changed=true;
   });
   routes.forEach(r => {
     if(r.isCarryOver) return;                          // already flagged
     if(r.status === 'out') return;                     // departed
     const v = r.vehicleId ? vehicles.find(x=>x.id===r.vehicleId) : null;
     if(v && v.status === 'out') return;                // vehicle departed
-    if((r.date||TODAY) >= TODAY) return;               // created today → never a carry-over
-    const isOld = r.createdAt ? r.createdAt < RESET_TS : false;
-    if(isOld) { r.isCarryOver=true; r.carryOverDate=r.date||TODAY; changed=true; }
+    if(!r.createdAt || r.createdAt >= RESET_TS) return;// created in the current working day
+    r.isCarryOver=true; r.carryOverDate=r.date||TODAY; changed=true;
   });
   if(changed) { save(); }
 }
 
-// Self-heal: an item created today can never be a legitimate carry-over (those
-// are always from a previous working day). If a clock-basis mismatch wrongly
-// flagged today's routes/vehicles as pendency, clear those flags and re-sync.
+// Self-heal: clear carry-over flags on items that actually belong to the CURRENT
+// working day — anything created at/after the last "Start New Day" (RESET_TS). If
+// RESET_TS is unknown/invalid (0 — e.g. after discarding a poisoned future value),
+// clear all pendency and wait for the next real reset to re-establish it.
 function healFalseCarryOvers() {
   let changed=false;
-  vehicles.forEach(v=>{ if(v.isCarryOver && (v.date||TODAY) >= TODAY){ v.isCarryOver=false; changed=true; } });
-  routes.forEach(r=>{ if(r.isCarryOver && (r.date||TODAY) >= TODAY){ r.isCarryOver=false; changed=true; } });
+  const isCurrentDay = (item) => !RESET_TS || (item.createdAt && item.createdAt >= RESET_TS);
+  vehicles.forEach(v=>{ if(v.isCarryOver && isCurrentDay(v)){ v.isCarryOver=false; changed=true; } });
+  routes.forEach(r=>{ if(r.isCarryOver && isCurrentDay(r)){ r.isCarryOver=false; changed=true; } });
   if(changed) save();
   return changed;
 }
@@ -1098,15 +1120,12 @@ function healFalseCarryOvers() {
 // checkDay: runs on login/visibility/interval — NEVER resets, only marks carry-overs
 async function checkDay() {
   TODAY = getToday();
-  // Sync RESET_TS from Firebase if newer
+  // Discard a poisoned future reset marker, then adopt a valid one from Firebase
+  clampResetTs();
   if(typeof db !== 'undefined') {
     try {
       const snap = await db.ref('gnsc/live/resetTs').once('value');
-      const fbTs = snap.val();
-      if(fbTs && fbTs > RESET_TS) {
-        RESET_TS = fbTs;
-        localStorage.setItem('gnsc_reset_ts', String(RESET_TS));
-      }
+      adoptResetTs(snap.val());
     } catch(e) {}
   }
   healFalseCarryOvers();
@@ -1117,9 +1136,10 @@ async function checkDay() {
 async function startNewDay() {
   TODAY = getToday();
 
-  // 12-hour guard: only admin can press again within 12 hours
+  // 12-hour guard: only admin can press again within 12 hours.
+  // A future/invalid marker (poisoned clock) counts as "long ago" so it never blocks.
   const lastResetTs = parseInt(localStorage.getItem('gnsc_reset_ts')||'0');
-  const hrsSince = lastResetTs ? (serverNow()-lastResetTs)/3600000 : 99;
+  const hrsSince = (lastResetTs && lastResetTs<=serverNow()) ? (serverNow()-lastResetTs)/3600000 : 99;
   if(hrsSince < 12) {
     if(currentUser?.role !== 'admin') {
       toast('⚠️ Already started today — only admin can run again within 12 hours','err');

@@ -133,32 +133,58 @@ export function etaOverdueToday(eta, nowMinsVal, resetTs, nowDate) {
 // Start-New-Day boundary (RESET_TS) is a carry-over. createdAt and resetTs must
 // be on the same (server) clock — hence the serverNow() stamping in 9935d23.
 
-/** createdAt strictly before the reset boundary. Unknown createdAt / no reset → false. */
+/**
+ * Core rule: an item is a carry-over iff it was created strictly BEFORE the current
+ * working day began (createdAt < resetTs). The working day is bounded by the last
+ * "Start New Day" (resetTs), NOT the calendar — an item created after the reset stays
+ * "today" even past midnight, until the next reset. Unknown createdAt or no reset
+ * boundary (resetTs 0) → not a carry-over.
+ */
 export function isOldByResetTs(createdAt, resetTs) {
-  return createdAt ? createdAt < resetTs : false;
+  return !!(resetTs && createdAt && createdAt < resetTs);
 }
 
-/**
- * Should this vehicle be flagged as a carry-over from a previous working day?
- * `today` (a 'YYYY-MM-DD' string) is optional; when given, an item dated today
- * (or with no date) is never a carry-over — this is the safety guard that stops
- * a clock-basis mismatch from wrongly flagging today's fresh routes.
- */
-export function shouldMarkCarryOverVehicle(v, resetTs, today) {
+/** Should this vehicle be flagged as a carry-over? (routed, not departed, created before the reset) */
+export function shouldMarkCarryOverVehicle(v, resetTs) {
   if (!v) return false;
   if (v.isCarryOver) return false;       // already flagged
   if (v.status === 'out') return false;  // departed
   if (!v.routeId) return false;          // pool vehicle — never flag
-  if (today && (v.date || today) >= today) return false; // created today — never a carry-over
   return isOldByResetTs(v.createdAt, resetTs);
 }
 
 /** Should this route be flagged as a carry-over? `linkedVehicle` is its assigned vehicle (or null). */
-export function shouldMarkCarryOverRoute(r, resetTs, linkedVehicle, today) {
+export function shouldMarkCarryOverRoute(r, resetTs, linkedVehicle) {
   if (!r) return false;
   if (r.isCarryOver) return false;
   if (r.status === 'out') return false;
   if (linkedVehicle && linkedVehicle.status === 'out') return false;
-  if (today && (r.date || today) >= today) return false; // created today — never a carry-over
   return isOldByResetTs(r.createdAt, resetTs);
+}
+
+// ── RESET_TS integrity ───────────────────────────────────────────────────────
+// The last "Start New Day" can never be in the future. A future value (from a
+// device whose clock ran ahead, propagated by "always take the larger") makes
+// brand-new uploads look older than the reset and wrongly flags them as pendency.
+
+/** A valid reset marker is a positive value at or before server-corrected now. */
+export function isValidResetTs(resetTs, serverNowVal) {
+  return resetTs > 0 && resetTs <= serverNowVal;
+}
+
+/** Discard a poisoned future marker (→ 0 = unknown); otherwise keep it. */
+export function clampResetTs(current, serverNowVal) {
+  return current && current > serverNowVal ? 0 : current;
+}
+
+/**
+ * New RESET_TS after receiving `incoming`: adopt it when it's a valid (non-future)
+ * value that is newer than ours, OR when our own value is invalid/future. Future
+ * (poisoned) incoming values are rejected. Returns the resulting value.
+ */
+export function adoptResetTs(current, incoming, serverNowVal) {
+  if (!incoming) return current;
+  if (incoming > serverNowVal) return current;                        // reject future
+  if (incoming > current || current > serverNowVal) return incoming;  // newer, or ours invalid
+  return current;
 }
