@@ -82,6 +82,31 @@ describe('shouldMarkCarryOverVehicle', () => {
       shouldMarkCarryOverVehicle({ createdAt: 1500, routeId: 'r1', status: 'planned' }, RESET)
     ).toBe(false);
   });
+  it("never flags an item dated today, even if createdAt < RESET (clock-mismatch guard)", () => {
+    // createdAt (500) is below RESET (1000) due to a clock-basis mismatch, but
+    // the route is dated today → must NOT become a carry-over.
+    expect(
+      shouldMarkCarryOverVehicle(
+        { createdAt: 500, routeId: 'r1', status: 'planned', date: '2026-07-28' },
+        RESET,
+        '2026-07-28'
+      )
+    ).toBe(false);
+  });
+  it('still flags a genuinely old item dated before today', () => {
+    expect(
+      shouldMarkCarryOverVehicle(
+        { createdAt: 500, routeId: 'r1', status: 'planned', date: '2026-07-27' },
+        RESET,
+        '2026-07-28'
+      )
+    ).toBe(true);
+  });
+  it('treats a missing date as today (does not flag) when today is supplied', () => {
+    expect(
+      shouldMarkCarryOverVehicle({ createdAt: 500, routeId: 'r1', status: 'planned' }, RESET, '2026-07-28')
+    ).toBe(false);
+  });
 });
 
 describe('shouldMarkCarryOverRoute', () => {
@@ -104,6 +129,16 @@ describe('shouldMarkCarryOverRoute', () => {
   it("is not flagged for today's data", () => {
     expect(
       shouldMarkCarryOverRoute({ createdAt: 1500, status: 'short' }, RESET, null)
+    ).toBe(false);
+  });
+  it("never flags a route dated today even if createdAt < RESET (clock-mismatch guard)", () => {
+    expect(
+      shouldMarkCarryOverRoute(
+        { createdAt: 500, status: 'short', date: '2026-07-28' },
+        RESET,
+        null,
+        '2026-07-28'
+      )
     ).toBe(false);
   });
 });

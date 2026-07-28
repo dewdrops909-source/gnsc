@@ -138,20 +138,27 @@ export function isOldByResetTs(createdAt, resetTs) {
   return createdAt ? createdAt < resetTs : false;
 }
 
-/** Should this vehicle be flagged as a carry-over from a previous working day? */
-export function shouldMarkCarryOverVehicle(v, resetTs) {
+/**
+ * Should this vehicle be flagged as a carry-over from a previous working day?
+ * `today` (a 'YYYY-MM-DD' string) is optional; when given, an item dated today
+ * (or with no date) is never a carry-over — this is the safety guard that stops
+ * a clock-basis mismatch from wrongly flagging today's fresh routes.
+ */
+export function shouldMarkCarryOverVehicle(v, resetTs, today) {
   if (!v) return false;
   if (v.isCarryOver) return false;       // already flagged
   if (v.status === 'out') return false;  // departed
   if (!v.routeId) return false;          // pool vehicle — never flag
+  if (today && (v.date || today) >= today) return false; // created today — never a carry-over
   return isOldByResetTs(v.createdAt, resetTs);
 }
 
 /** Should this route be flagged as a carry-over? `linkedVehicle` is its assigned vehicle (or null). */
-export function shouldMarkCarryOverRoute(r, resetTs, linkedVehicle) {
+export function shouldMarkCarryOverRoute(r, resetTs, linkedVehicle, today) {
   if (!r) return false;
   if (r.isCarryOver) return false;
   if (r.status === 'out') return false;
   if (linkedVehicle && linkedVehicle.status === 'out') return false;
+  if (today && (r.date || today) >= today) return false; // created today — never a carry-over
   return isOldByResetTs(r.createdAt, resetTs);
 }

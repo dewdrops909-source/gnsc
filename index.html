@@ -451,7 +451,7 @@ window.addEventListener('unhandledrejection',e=>{
 // ─────────────────────────────────────────────
 // DATA
 // ─────────────────────────────────────────────
-const APP_VER = 14; // increment with every deploy
+const APP_VER = 15; // increment with every deploy
 
 // Force re-login if app version changed
 const _storedVer = parseInt(localStorage.getItem('gnsc_app_ver')||'0');
@@ -1068,6 +1068,7 @@ function markCarryOvers() {
     if(v.isCarryOver) return;                          // already flagged
     if(v.status === 'out') return;                     // departed
     if(!v.routeId) return;                             // pool vehicle — never flag
+    if((v.date||TODAY) >= TODAY) return;               // created today → never a carry-over
     const isOld = v.createdAt ? v.createdAt < RESET_TS : false;
     if(isOld) { v.isCarryOver=true; v.carryOverDate=v.date||TODAY; changed=true; }
   });
@@ -1076,10 +1077,22 @@ function markCarryOvers() {
     if(r.status === 'out') return;                     // departed
     const v = r.vehicleId ? vehicles.find(x=>x.id===r.vehicleId) : null;
     if(v && v.status === 'out') return;                // vehicle departed
+    if((r.date||TODAY) >= TODAY) return;               // created today → never a carry-over
     const isOld = r.createdAt ? r.createdAt < RESET_TS : false;
     if(isOld) { r.isCarryOver=true; r.carryOverDate=r.date||TODAY; changed=true; }
   });
   if(changed) { save(); }
+}
+
+// Self-heal: an item created today can never be a legitimate carry-over (those
+// are always from a previous working day). If a clock-basis mismatch wrongly
+// flagged today's routes/vehicles as pendency, clear those flags and re-sync.
+function healFalseCarryOvers() {
+  let changed=false;
+  vehicles.forEach(v=>{ if(v.isCarryOver && (v.date||TODAY) >= TODAY){ v.isCarryOver=false; changed=true; } });
+  routes.forEach(r=>{ if(r.isCarryOver && (r.date||TODAY) >= TODAY){ r.isCarryOver=false; changed=true; } });
+  if(changed) save();
+  return changed;
 }
 
 // checkDay: runs on login/visibility/interval — NEVER resets, only marks carry-overs
@@ -1096,6 +1109,7 @@ async function checkDay() {
       }
     } catch(e) {}
   }
+  healFalseCarryOvers();
   markCarryOvers();
 }
 
